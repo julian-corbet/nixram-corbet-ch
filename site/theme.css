@@ -1,0 +1,23 @@
+/* nixram theme — overrides only accent/font/radius of the foss v1 base. */
+
+:root {
+  --accent: #34d399;
+  --accent-hover: #6ee7b7;
+  --accent-dim: rgba(52, 211, 153, 0.12);
+  --accent-glow: rgba(52, 211, 153, 0.08);
+  --accent-text: #0b1120;
+
+  --shadow-terminal: 0 0 0 1px var(--border), 0 8px 40px rgba(0,0,0,0.3), 0 0 80px var(--accent-glow);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --accent: #047857;
+    --accent-hover: #065f46;
+    --accent-dim: rgba(4, 120, 87, 0.08);
+    --accent-glow: rgba(4, 120, 87, 0.06);
+    --accent-text: #ffffff;
+
+    --shadow-terminal: 0 0 0 1px rgba(0,0,0,0.08), 0 8px 40px rgba(0,0,0,0.15);
+  }
+}
