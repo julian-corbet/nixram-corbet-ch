@@ -1,0 +1,848 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nixram — level-anchored memory tuning for NixOS</title>
+<meta name="description" content="nixram is a NixOS flake module: declare a RAM level, get coherent zram/zswap sizing, PSI-armed systemd-oomd, and vm.* sysctl tuning derived from it — every value tagged sourced, extrapolated, or kernel default.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='6' width='20' height='12' rx='2' fill='%230C1116' stroke='%23E5A32E' stroke-width='1.6'/%3E%3Cline x1='2' y1='12' x2='22' y2='12' stroke='%233EC5B4' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3Crect x='5' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='9' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='13' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='17' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --amber: #E5A32E;
+    --teal: #3EC5B4;
+    --red: #E5484D;
+    --bg: #F7F9FB;
+    --bg-alt: #EDF1F4;
+    --fg: #1A2129;
+    --fg-dim: #4A5560;
+    --border: rgba(26, 33, 41, 0.14);
+    --code-bg: rgba(26, 33, 41, 0.06);
+    --mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
+    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0C1116;
+      --bg-alt: #121922;
+      --fg: #E6EDF3;
+      --fg-dim: #93A1AC;
+      --border: rgba(230, 237, 243, 0.14);
+      --code-bg: rgba(230, 237, 243, 0.07);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  .wrap {
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+  }
+  h1, h2, h3 { font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em; }
+  code, pre, .mono { font-family: var(--mono); }
+  a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 0.15em; }
+  a:hover { color: var(--amber); }
+
+  code:not(pre code) {
+    background: var(--code-bg);
+    border-radius: 0.25em;
+    padding: 0.1em 0.4em;
+    font-size: 0.92em;
+  }
+
+  .rule {
+    border: none;
+    height: 1px;
+    background: var(--amber);
+    opacity: 0.55;
+    margin: 4rem 0;
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    padding: 5.5rem 0 3.5rem;
+    text-align: center;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    color: var(--fg-dim);
+    letter-spacing: 0.02em;
+    margin: 0 0 1.25rem;
+  }
+  .kicker em { color: var(--amber); font-style: normal; }
+  h1.title {
+    font-size: clamp(3rem, 12vw, 6rem);
+    margin: 0;
+    line-height: 1;
+    background: linear-gradient(100deg, var(--amber), var(--teal));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .tagline {
+    max-width: 42rem;
+    margin: 1.75rem auto 0;
+    font-size: 1.15rem;
+    color: var(--fg-dim);
+  }
+  .get-it {
+    margin-top: 2.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.9rem;
+    justify-content: center;
+    align-items: center;
+  }
+  .get-it a.button {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    color: var(--fg);
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 0.4em;
+    padding: 0.6em 1.1em;
+    text-decoration: none;
+  }
+  .get-it a.button:hover { border-color: var(--amber); color: var(--amber); }
+  .get-it code {
+    font-size: 0.85rem;
+    padding: 0.6em 0.9em;
+  }
+
+  /* ---------- Sections ---------- */
+  section { padding: 1rem 0; }
+  h2.section-title {
+    font-size: 1.5rem;
+    margin: 0 0 1.25rem;
+  }
+  h2.section-title .num {
+    color: var(--amber);
+    margin-right: 0.5rem;
+  }
+  .lede {
+    max-width: 48rem;
+    font-size: 1.05rem;
+  }
+
+  /* ---------- Instrument ---------- */
+  .instrument-frame {
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    background: var(--bg-alt);
+    padding: 0.75rem;
+  }
+  canvas#instrument-canvas {
+    display: block;
+    width: 100%;
+    height: 340px;
+    border-radius: 0.4rem;
+  }
+  .instrument-caption {
+    margin-top: 1rem;
+    font-size: 0.92rem;
+    color: var(--fg-dim);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ---------- Table ---------- */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    color: var(--fg-dim);
+    margin-bottom: 1rem;
+  }
+  .legend b { color: var(--fg); }
+  .table-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 62rem;
+    font-size: 0.9rem;
+  }
+  thead th {
+    text-align: left;
+    font-family: var(--mono);
+    font-weight: 600;
+    padding: 0.75em 1em;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+  }
+  tbody td {
+    padding: 0.7em 1em;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child { font-weight: 600; }
+  tbody tr:hover { background: var(--code-bg); }
+  .badge { opacity: 0.9; }
+  .b-sourced { color: var(--teal); }
+  .b-extrapolated { color: var(--amber); }
+  .b-default { color: var(--fg-dim); }
+  .footnote {
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+    margin-top: 0.75rem;
+  }
+
+  .const-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+  .const-card {
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.9rem 1rem;
+    background: var(--bg-alt);
+  }
+  .const-card .k {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--fg-dim);
+    display: block;
+  }
+  .const-card .v {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    margin-top: 0.2rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  h3.subhead {
+    font-size: 1.05rem;
+    margin: 2.5rem 0 0.25rem;
+  }
+  .subhead-note {
+    color: var(--fg-dim);
+    font-size: 0.9rem;
+    margin: 0 0 0.5rem;
+  }
+
+  /* ---------- Decision cards ---------- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 1.25rem;
+    background: var(--bg-alt);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .card.flag-amber { border-color: var(--amber); box-shadow: inset 3px 0 0 var(--amber); }
+  .card.flag-red { border-color: var(--red); box-shadow: inset 3px 0 0 var(--red); }
+  .card .flag-label {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .card.flag-amber .flag-label { color: var(--amber); }
+  .card.flag-red .flag-label { color: var(--red); }
+  .card h4 {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 1rem;
+  }
+  .card p { margin: 0; font-size: 0.92rem; color: var(--fg-dim); }
+  .card .honesty { font-size: 0.8rem; font-family: var(--mono); }
+  .card a.doclink { font-size: 0.85rem; }
+
+  /* ---------- Quickstart ---------- */
+  pre.snippet {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+    line-height: 1.65;
+  }
+  .tok-key { color: var(--teal); }
+  .tok-str { color: var(--amber); }
+  .tok-com { color: var(--fg-dim); font-style: italic; }
+  .tok-punc { color: var(--fg-dim); }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 3rem 0 4rem;
+    color: var(--fg-dim);
+    font-size: 0.9rem;
+  }
+  footer .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  @media (max-width: 480px) {
+    .hero { padding: 3.5rem 0 2rem; }
+    h2.section-title { font-size: 1.3rem; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="kicker">a homage to nix + RAM — colloquially, <em>you don't have RAM</em></p>
+    <h1 class="title">nixram</h1>
+    <p class="tagline">
+      Declare a RAM level. Get coherent zram/zswap sizing, PSI-armed
+      systemd-oomd, and <code>vm.*</code> sysctl tuning — derived from one
+      table, instead of a dozen loosely-related knobs you hand-pick and hope
+      agree with each other.
+    </p>
+    <div class="get-it">
+      <a class="button" href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub repository →</a>
+      <code>nix run github:julian-corbet/nixram-corbet-ch#detect-level</code>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section id="thesis">
+    <h2 class="section-title"><span class="num">01</span>The thesis</h2>
+    <p class="lede">
+      zram's <code>disksize</code> is only a cheap, virtual ceiling, and the
+      real physical cost is bounded separately by
+      <code>zram-resident-limit</code>, kept inside a conservative fraction of
+      RAM at every tier — so disksize can afford to be generous, and
+      compression gets room to stretch the same physical spend further
+      before hitting a wall. systemd-oomd is armed on PSI (pressure stall
+      information), not on swap-used percentage, because stall time is
+      medium-agnostic and a percentage-of-disksize detector would be reading
+      the wrong number under this sizing model. Every value nixram sets is
+      tagged <b>sourced</b>, <b>extrapolated</b>, or <b>kernel default</b>, so
+      nothing here is presented as more settled than it actually is.
+    </p>
+  </section>
+
+  <hr class="rule">
+
+  <section id="instrument">
+    <h2 class="section-title"><span class="num">02</span>The instrument</h2>
+    <p class="lede">
+      Pages fall out of ordinary memory and land in the compressed pool.
+      Watch what happens to their size on the way in.
+    </p>
+    <div class="instrument-frame">
+      <canvas id="instrument-canvas" aria-hidden="true"></canvas>
+    </div>
+    <p class="instrument-caption sr-only">
+      A diagram: small squares representing memory pages drift downward and
+      shrink as they compress into a pool at the bottom of the frame. The
+      pool's physical height is capped by a solid amber line labeled
+      "zram-resident-limit — the real budget". A taller dashed teal line
+      further up is labeled "disksize — the virtual ceiling". Because pages
+      shrink as they compress, more logical pages fit under the amber line
+      than would fit if they stayed full size.
+    </p>
+    <p class="instrument-caption" aria-hidden="true">
+      Amber — <code>zram-resident-limit</code>, the real, physical wall.
+      Teal, dashed — <code>disksize</code>, a generous virtual ceiling that
+      costs nothing once the amber line is doing the actual safety job.
+    </p>
+  </section>
+
+  <hr class="rule">
+
+  <section id="levels">
+    <h2 class="section-title"><span class="num">03</span>The 14-level explorer</h2>
+    <p class="lede">
+      Fourteen RAM anchors, 256M through 128G, each a complete, coherent set
+      of values — copied straight from <code>levels.nix</code>. Every value
+      carries its own honesty badge; nothing here is presented as more
+      settled than it actually is.
+    </p>
+    <div class="legend">
+      <span><b class="b-sourced">●</b> sourced</span>
+      <span><b class="b-extrapolated">◐</b> extrapolated</span>
+      <span><b class="b-default">○</b> kernel default</span>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Level</th>
+            <th>zram-size</th>
+            <th>zram-resident-limit</th>
+            <th>compression</th>
+            <th>recompression tier</th>
+            <th>watermark_scale_factor</th>
+            <th>oomd</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>256M</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd(level=1)</code> <span class="badge b-extrapolated">◐</span></td><td>off <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>off <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>512M</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>1G</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>2G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>4G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>6G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>8G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>10G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>12G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>16G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>24G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>32G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>64G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td>unset (null) <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>100 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr><td>128G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td>unset (null) <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>100 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="footnote">
+      ¹ the <code>/2</code> taper is extrapolated; the 16384 MiB (16 GiB) cap
+      it approaches is sourced (Pop!_OS). At 32G the two meet exactly
+      (32 / 2 = 16).
+    </p>
+
+    <h3 class="subhead">Constants shared by every level</h3>
+    <p class="subhead-note">
+      Properties of the swap medium (zram) or the reclaim/OOM machinery, not
+      the box — they don't vary by RAM size.
+    </p>
+    <div class="const-grid">
+      <div class="const-card"><span class="k">vm.swappiness</span><span class="v">180 <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">vm.page-cluster</span><span class="v">0 <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">vm.watermark_boost_factor</span><span class="v">0 <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">vm.min_free_kbytes</span><span class="v">untouched <span class="badge b-default">○</span></span></div>
+      <div class="const-card"><span class="k">MGLRU min_ttl_ms</span><span class="v">1000 <span class="badge b-sourced">●</span>, flagged</span></div>
+      <div class="const-card"><span class="k">PSI threshold</span><span class="v">60% / 30s <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">zram swap-priority</span><span class="v">100 <span class="badge b-sourced">●</span></span></div>
+    </div>
+
+    <h3 class="subhead">Zswap profile (<code>mode = "zswap"</code>)</h3>
+    <p class="subhead-note">
+      A separate, flat profile for laptops and desktops with real disk-backed
+      swap.
+    </p>
+    <div class="const-grid">
+      <div class="const-card"><span class="k">zswap.max_pool_percent</span><span class="v">20 <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">zswap.accept_threshold_percent</span><span class="v">90 <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">zswap.shrinker_enabled</span><span class="v">on <span class="badge b-extrapolated">◐</span></span><span class="footnote" style="margin-top:0.2rem;">upstream default is off</span></div>
+      <div class="const-card"><span class="k">zswap.zpool</span><span class="v">zsmalloc <span class="badge b-sourced">●</span></span><span class="footnote" style="margin-top:0.2rem;">only option left on current kernels</span></div>
+      <div class="const-card"><span class="k">vm.swappiness</span><span class="v">120 <span class="badge b-extrapolated">◐</span></span></div>
+      <div class="const-card"><span class="k">vm.page-cluster</span><span class="v">2 (SSD) / 3, untouched (HDD) <span class="badge b-sourced">●</span></span></div>
+      <div class="const-card"><span class="k">vm.watermark_scale_factor</span><span class="v">125, flat <span class="badge b-sourced">●</span></span></div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section id="decisions">
+    <h2 class="section-title"><span class="num">04</span>Decision cards</h2>
+    <p class="lede">
+      Every card is one decision, one line of reasoning, and its honesty
+      class. Two are flagged: one because it deliberately breaks with
+      upstream guidance, one because it deliberately configures nothing at
+      all.
+    </p>
+    <div class="card-grid">
+
+      <div class="card flag-amber">
+        <span class="flag-label">Amber-flagged</span>
+        <h4>Disksize exceeds upstream guidance — deliberately</h4>
+        <p>
+          zram-generator's own docs recommend sizing disksize to 0.1–0.5 of
+          RAM. Every level here exceeds that, up to 2x RAM at the smallest
+          tiers, because disksize is only the virtual ceiling once a
+          resident limit is doing the real physical-safety job.
+        </p>
+        <span class="honesty b-extrapolated">◐ extrapolated curve, sourced endpoints</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#1-zram-disksize-curve">rationale.md [1] →</a>
+      </div>
+
+      <div class="card flag-red">
+        <span class="flag-label">Red-flagged</span>
+        <h4>SwapUsedLimit / ManagedOOMSwap: not configured anywhere</h4>
+        <p>
+          Not a decorative backstop left at a safe default — genuinely
+          absent, at every level. A swap-used percentage reads the wrong
+          number once disksize is deliberately inflated beyond the real
+          budget; PSI has no such blind spot.
+        </p>
+        <span class="honesty">dropped by decision, not by oversight</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere">faq.md →</a>
+      </div>
+
+      <div class="card">
+        <h4>PSI-only OOM detection</h4>
+        <p>
+          systemd-oomd is armed on memory-pressure stall time, never on
+          swap-used percentage. Stall time is medium-agnostic — it doesn't
+          care whether the swap is zram, zswap, or disk.
+        </p>
+        <span class="honesty b-sourced">● sourced (systemd-oomd upstream defaults)</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#10-psi-thresholds-60--30s">rationale.md [10] →</a>
+      </div>
+
+      <div class="card">
+        <h4>Detect once, paste once</h4>
+        <p>
+          Nix evaluation is pure and static — it can't read a target
+          machine's live <code>/proc/meminfo</code>. No default level, no
+          eval-time auto-detection: a detector app prints a line you paste
+          into your own config and commit, like any other hardware fact.
+        </p>
+        <span class="honesty">a deliberate non-goal, not a missing convenience</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-does-level-have-no-default-and-no-eval-time-auto-detection">faq.md →</a>
+      </div>
+
+      <div class="card">
+        <h4>Idle recompression: two-phase rolling timer</h4>
+        <p>
+          A naive mark-then-recompress pass would recompress the entire pool
+          every run. Marking and recompressing are split across two timer
+          firings, so "idle" means one full interval of real non-use. Idle
+          tier: <code>zstd(level=12)</code> — the densest setting below
+          zstd's optimal-parser cost cliff, not 19.
+        </p>
+        <span class="honesty b-extrapolated">◐ extrapolated design, sourced kernel primitive</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#11-idle-recompression">rationale.md [11] →</a>
+      </div>
+
+      <div class="card">
+        <h4>No min_free_kbytes formula</h4>
+        <p>
+          No distro default or kernel doc reviewed offers a universal
+          per-tier formula that generalizes across 256M–128G. Rather than
+          invent one, the kernel's own computed value is left untouched at
+          every level — an override exists only for operators who've
+          measured their own workload.
+        </p>
+        <span class="honesty b-default">○ kernel default — not a nixram opinion</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#6-vmmin_free_kbytes-untouched">rationale.md [6] →</a>
+      </div>
+
+      <div class="card">
+        <h4>The honesty taxonomy itself, as a feature</h4>
+        <p>
+          Every tunable is tagged sourced, extrapolated, or kernel default —
+          out loud, in the code comments, the table, and here. Nothing is
+          presented as more settled than it actually is, and the numbering
+          behind each tag is load-bearing across the whole module.
+        </p>
+        <span class="honesty">the taxonomy is the product, not documentation of it</span>
+        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">rationale.md →</a>
+      </div>
+
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section id="quickstart">
+    <h2 class="section-title"><span class="num">05</span>Quickstart</h2>
+    <pre class="snippet"><code><span class="tok-punc">{</span>
+  <span class="tok-key">inputs.nixram.url</span> <span class="tok-punc">=</span> <span class="tok-str">"github:julian-corbet/nixram-corbet-ch"</span><span class="tok-punc">;</span>
+<span class="tok-punc">}</span>
+<span class="tok-com"># in your nixosSystem modules:</span>
+<span class="tok-key">imports</span> <span class="tok-punc">=</span> <span class="tok-punc">[</span> <span class="tok-key">inputs.nixram.nixosModules.nixram</span> <span class="tok-punc">];</span>
+<span class="tok-key">services.nixram</span> <span class="tok-punc">=</span> <span class="tok-punc">{</span>
+  <span class="tok-key">enable</span> <span class="tok-punc">=</span> <span class="tok-key">true</span><span class="tok-punc">;</span>
+  <span class="tok-key">level</span> <span class="tok-punc">=</span> <span class="tok-str">"4G"</span><span class="tok-punc">;</span>  <span class="tok-com"># find yours: nix run github:julian-corbet/nixram-corbet-ch#detect-level</span>
+<span class="tok-punc">};</span></code></pre>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>MIT licensed.</span>
+    <span><a href="https://github.com/julian-corbet/nixram-corbet-ch">github.com/julian-corbet/nixram-corbet-ch</a></span>
+    <span>Values marked ◐ are reasoned, not measured — <code>experiments/</code> tracks what still needs measuring.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById("instrument-canvas");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+
+  var reduceMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Theme colors are read from CSS so the canvas follows light/dark
+  // automatically; only the two brand colors are fixed by design.
+  var AMBER = "#E5A32E";
+  var TEAL = "#3EC5B4";
+  var fg, fgDim, dividerBg;
+
+  function readTheme() {
+    var cs = getComputedStyle(document.documentElement);
+    fg = cs.getPropertyValue("--fg").trim() || "#1A2129";
+    fgDim = cs.getPropertyValue("--fg-dim").trim() || "#4A5560";
+    dividerBg = cs.getPropertyValue("--bg-alt").trim() || "#EDF1F4";
+  }
+  readTheme();
+
+  var width = 0, height = 0, dpr = Math.max(1, window.devicePixelRatio || 1);
+  var tealY = 0, amberY = 0; // reference line y-positions, CSS px
+
+  function resize() {
+    var rect = canvas.parentElement.getBoundingClientRect();
+    width = rect.width - 24; // minus frame padding
+    height = 340;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    tealY = height * 0.24;   // virtual ceiling: high up, generous
+    amberY = height * 0.60;  // physical budget: closer to the pool
+
+    buildPool();
+  }
+
+  // ---- The pool: a packed grid of compressed pages, capped by amberY ----
+  var CELL = 7;      // compressed page size, px
+  var cols, poolRows, poolCells; // poolCells: array of {age} or null
+
+  function buildPool() {
+    cols = Math.max(4, Math.floor(width / CELL));
+    poolRows = Math.max(2, Math.floor((height - amberY) / CELL));
+    poolCells = new Array(cols * poolRows).fill(null);
+  }
+
+  // ---- Falling pages: full-size, uncompressed, drifting toward the pool ----
+  var FULL_SIZE = 11;
+  var COMPRESS_MS = 500;
+  var pages = [];
+  var nextSpawn = 0;
+
+  function spawnPage(now) {
+    pages.push({
+      x: 10 + Math.random() * (width - 20),
+      y: -10 - Math.random() * 40,
+      speed: 18 + Math.random() * 10, // px/sec
+      size: FULL_SIZE,
+      compressing: false,
+      compressStart: 0,
+      fromX: 0, fromY: 0, toX: 0, toY: 0
+    });
+    nextSpawn = now + 550 + Math.random() * 500;
+  }
+
+  function firstEmptyCell() {
+    // Fill bottom row-up first; once full, recycle a random occupied cell
+    // (steady-state churn, standing in for idle recompression turnover).
+    for (var r = poolRows - 1; r >= 0; r--) {
+      for (var c = 0; c < cols; c++) {
+        var i = r * cols + c;
+        if (!poolCells[i]) return i;
+      }
+    }
+    return Math.floor(Math.random() * poolCells.length);
+  }
+
+  function cellCenter(i) {
+    var r = Math.floor(i / cols), c = i % cols;
+    return {
+      x: c * CELL + CELL / 2,
+      y: height - (poolRows - r) * CELL + CELL / 2
+    };
+  }
+
+  var lastTime = null;
+
+  function step(now) {
+    if (nextSpawn === 0) nextSpawn = now;
+    var dt = lastTime === null ? 0 : (now - lastTime) / 1000;
+    lastTime = now;
+
+    if (now >= nextSpawn && pages.length < 40) spawnPage(now);
+
+    for (var i = pages.length - 1; i >= 0; i--) {
+      var p = pages[i];
+      if (!p.compressing) {
+        p.y += p.speed * dt;
+        if (p.y >= amberY) {
+          p.compressing = true;
+          p.compressStart = now;
+          p.fromX = p.x; p.fromY = p.y;
+          var idx = firstEmptyCell();
+          poolCells[idx] = { age: now };
+          var center = cellCenter(idx);
+          p.toX = center.x; p.toY = center.y;
+        }
+      } else {
+        var t = Math.min(1, (now - p.compressStart) / COMPRESS_MS);
+        p.x = p.fromX + (p.toX - p.fromX) * t;
+        p.y = p.fromY + (p.toY - p.fromY) * t;
+        p.size = FULL_SIZE + (CELL - 2 - FULL_SIZE) * t;
+        if (t >= 1) pages.splice(i, 1);
+      }
+    }
+
+    render(now);
+    raf = requestAnimationFrame(step);
+  }
+
+  function render(now) {
+    ctx.clearRect(0, 0, width, height);
+
+    // Pool region backdrop
+    ctx.fillStyle = dividerBg;
+    ctx.fillRect(0, amberY, width, height - amberY);
+
+    // Settled, compressed pages
+    for (var i = 0; i < poolCells.length; i++) {
+      var cell = poolCells[i];
+      if (!cell) continue;
+      var center = cellCenter(i);
+      var twinkle = now ? 0.75 + 0.25 * Math.sin((now / 900) + i) : 1;
+      ctx.fillStyle = AMBER;
+      ctx.globalAlpha = twinkle;
+      ctx.fillRect(center.x - (CELL - 2) / 2, center.y - (CELL - 2) / 2, CELL - 2, CELL - 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // Falling / compressing pages
+    for (var j = 0; j < pages.length; j++) {
+      var p = pages[j];
+      var s = p.size;
+      var color = p.compressing
+        ? lerpColor(TEAL, AMBER, (now - p.compressStart) / COMPRESS_MS)
+        : TEAL;
+      ctx.fillStyle = color;
+      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+    }
+
+    // Reference lines, drawn last so they read clearly over everything
+    ctx.save();
+    ctx.strokeStyle = TEAL;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, tealY);
+    ctx.lineTo(width, tealY);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.strokeStyle = AMBER;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, amberY);
+    ctx.lineTo(width, amberY);
+    ctx.stroke();
+
+    ctx.font = "12px " + '"SF Mono", "JetBrains Mono", monospace';
+    ctx.fillStyle = fgDim;
+    ctx.fillText("disksize — the virtual ceiling", 8, tealY - 8);
+    ctx.fillStyle = AMBER;
+    ctx.fillText("zram-resident-limit — the real budget", 8, amberY - 8);
+  }
+
+  function lerpColor(a, b, t) {
+    t = Math.max(0, Math.min(1, t));
+    var ca = hexToRgb(a), cb = hexToRgb(b);
+    var r = Math.round(ca.r + (cb.r - ca.r) * t);
+    var g = Math.round(ca.g + (cb.g - ca.g) * t);
+    var bl = Math.round(ca.b + (cb.b - ca.b) * t);
+    return "rgb(" + r + "," + g + "," + bl + ")";
+  }
+  function hexToRgb(hex) {
+    var n = parseInt(hex.slice(1), 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+
+  var raf = null;
+
+  function renderStaticFrame() {
+    // One calm, representative frame: a full pool, a few pages mid-fall,
+    // one mid-compression — no requestAnimationFrame loop at all.
+    pages = [
+      { x: width * 0.3, y: height * 0.1, size: FULL_SIZE, compressing: false },
+      { x: width * 0.6, y: height * 0.32, size: FULL_SIZE, compressing: false },
+      { x: width * 0.45, y: amberY - 2, size: (FULL_SIZE + CELL) / 2, compressing: true, compressStart: -COMPRESS_MS * 0.5 }
+    ];
+    for (var i = 0; i < poolCells.length; i++) {
+      poolCells[i] = Math.random() < 0.94 ? { age: 0 } : null;
+    }
+    render(null);
+  }
+
+  function start() {
+    resize();
+    if (reduceMotion) {
+      renderStaticFrame();
+    } else {
+      raf = requestAnimationFrame(step);
+    }
+  }
+
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      if (raf) cancelAnimationFrame(raf);
+      lastTime = null;
+      resize();
+      if (reduceMotion) {
+        renderStaticFrame();
+      } else {
+        raf = requestAnimationFrame(step);
+      }
+    }, 150);
+  });
+
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      readTheme();
+      if (reduceMotion) render(null);
+    });
+  }
+
+  start();
+})();
+</script>
+
+</body>
+</html>

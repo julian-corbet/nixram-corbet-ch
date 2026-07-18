@@ -1,0 +1,11 @@
+name = "nixram"
+compatibility_date = "2026-05-09"
+
+# The project's presentation page — plain static HTML served by a Cloudflare
+# Worker (same shape as the sibling project sites). Content lives in ./site.
+[assets]
+directory = "./site"
+
+[[routes]]
+pattern = "nixram.corbet.ch"
+custom_domain = true
