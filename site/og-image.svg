@@ -1,0 +1,25 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="0%" r="65%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#34d399" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#0b1120"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <g font-family="Hack, 'JetBrains Mono', 'Fira Code', monospace">
+    <text x="80" y="320" font-size="118" font-weight="800" fill="#f8fafc" letter-spacing="-4">nixram</text>
+    <text x="80" y="382" font-size="38" font-weight="500" fill="#34d399">Tell it how much RAM you have</text>
+    <text x="80" y="568" font-size="22" font-weight="400" fill="#8892a6">nixram.corbet.ch</text>
+  </g>
+
+  <g transform="translate(960, 320)">
+    <path d="M-105 -125 L0 -58 L105 -125" fill="none" stroke="#34d399" stroke-opacity="0.35" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M-105 125 L0 58 L105 125" fill="none" stroke="#34d399" stroke-opacity="0.35" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <rect x="-120" y="-26" width="240" height="18" rx="9" fill="#34d399"/>
+    <rect x="-120" y="8" width="240" height="18" rx="9" fill="#34d399"/>
+  </g>
+</svg>

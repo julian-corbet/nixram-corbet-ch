@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentation &mdash; nixram</title>
+  <meta name="description" content="nixram reference: why it exists, the two-limit model, a quick start, the full fourteen-level table with sourcing, per-tier reasoning, the zram and zswap profiles, every option, security, and the open questions.">
+  <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <link rel="canonical" href="https://nixram.corbet.ch/docs">
+  <meta property="og:title" content="nixram documentation">
+  <meta property="og:description" content="The two-limit model, the full level table with sourcing, per-tier reasoning, every option, and the open questions.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nixram.corbet.ch/docs">
+  <meta property="og:image" content="https://nixram.corbet.ch/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="nixram wordmark above a compressed-memory block symbol on a dark background">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://nixram.corbet.ch/og-image.png">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<nav class="docs-nav">
+  <a href="/" class="nav-brand">nixram</a>
+  <div class="nav-links">
+    <a href="/">Home</a>
+    <a href="#quick-start">Quick start</a>
+    <a href="#levels">Levels</a>
+    <a href="#options">Options</a>
+    <a href="#glossary">Glossary</a>
+    <a href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub</a>
+    <a href="/#get-started" class="btn-nav">Get started</a>
+  </div>
+</nav>
+
+<main class="docs-content">
+
+<h1>Documentation</h1>
+<p>The reasoning, the numbers, and what is still unmeasured.</p>
+
+<!-- ORIENTATION -->
+<div class="docs-section">
+  <h2>How to read this page</h2>
+  <p>nixram is one NixOS module. You declare how much RAM the machine has. From that one declaration it configures a compressed swap device that lives in RAM (or a compressed cache in front of real disk swap), an out-of-memory watchdog, and a set of kernel memory settings.</p>
+  <p>Everything that varies by RAM size comes from the same row of the same table, so those values cannot contradict each other. The few settings that are properties of the swap medium rather than of the machine are constants, listed under <a href="#constants">Shared settings</a>.</p>
+  <p>This page assumes you are comfortable with systemd and NixOS, and assumes nothing about kernel memory management. The words you need are defined as you meet them, and every kernel term used anywhere on this page has a plain definition in the <a href="#glossary">glossary at the end</a>.</p>
+  <p>Everything here is sourced. Each value carries a mark saying where it came from: someone else's published work, our own reasoning, or the kernel's own default left alone on purpose.</p>
+</div>
+
+<!-- WHY -->
+<div class="docs-section" id="why">
+  <h2>Why nixram?</h2>
+  <p><strong>The friction.</strong> Getting a Linux box to behave under memory pressure means picking a compressed swap size, then a real memory cap, then a swap priority, then a watchdog threshold, then four or five kernel settings. Each has its own blog post. None of them checks the others. A value that is right on a 512 MiB VPS is wrong on a 64 GiB server, and nothing tells you which one you are copying.</p>
+  <p><strong>The fix.</strong> One declaration &mdash; how much RAM the machine has &mdash; indexes a table that holds every one of those values, tiered across fourteen RAM sizes, with the source of each value written down next to it.</p>
+
+  <div class="table-scroll">
+    <table class="comp-table">
+      <thead>
+        <tr><th scope="col">Instead of</th><th scope="col">What it gives you</th><th scope="col">Where it stops</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Hand-tuned sysctls</th>
+          <td>Total control, and exactly the values you chose.</td>
+          <td>Nothing relates the swap size to the memory cap to the watchdog. You maintain the coherence by hand, per machine, forever.</td>
+        </tr>
+        <tr>
+          <th scope="row">zram-generator alone</th>
+          <td>The mechanism nixram itself uses. It creates and sizes the device properly.</td>
+          <td>A mechanism, not a policy. No per-RAM-size tiering, and no opinion on the watchdog or the kernel settings that have to agree with it.</td>
+        </tr>
+        <tr>
+          <th scope="row">The built-in NixOS <code>zramSwap</code></th>
+          <td>One option away, already in nixpkgs.</td>
+          <td>Only ever sets the ceiling, through <code>memoryPercent</code> and <code>memoryMax</code>. It has no concept of a real memory budget, which is the mechanism nixram's whole model depends on. nixpkgs itself documents zram-generator as the intended successor.</td>
+        </tr>
+        <tr>
+          <th scope="row">Fedora SwapOnZRAM</th>
+          <td>One good, well-argued default, and the source of several of nixram's cited values.</td>
+          <td>One default for one distribution. No tiering by RAM size, and no memory budget.</td>
+        </tr>
+        <tr>
+          <th scope="row">Pop!_OS default-settings</th>
+          <td>The richest cited set nixram draws on, covering the kernel settings too.</td>
+          <td>A fixed set of values for one hardware class. Nothing scales with RAM.</td>
+        </tr>
+        <tr>
+          <th scope="row">RHEL tuned</th>
+          <td>Mature, workload-aware profiles.</td>
+          <td>Organises around workload shape rather than RAM size, and models no relationship between a ceiling and a budget.</td>
+        </tr>
+        <tr>
+          <th scope="row">earlyoom, nohang</th>
+          <td>A good out-of-memory watchdog.</td>
+          <td>Overlaps only the watchdog layer. No opinion on zram sizing, zswap, or the kernel settings.</td>
+        </tr>
+        <tr>
+          <th scope="row">srvos, nixos-hardware</th>
+          <td>Plenty of other sensible NixOS defaults.</td>
+          <td>No memory-pressure story at all.</td>
+        </tr>
+        <tr>
+          <th scope="row">Doing nothing</th>
+          <td>The kernel's own defaults, which are reasonable and safe.</td>
+          <td>No compressed memory, and a machine that degrades quietly under pressure until the kernel kills something you needed.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- THE WORDS YOU NEED FIRST -->
+<div class="docs-section" id="essentials">
+  <h2>The words you need first</h2>
+  <p>Four definitions carry the rest of this page. Everything else is in the <a href="#glossary">glossary at the end</a>.</p>
+
+  <h3>The two mechanisms</h3>
+  <dl class="glossary">
+    <dt>zram</dt>
+    <dd>A block of your own RAM set up as a swap device. Cold pages get compressed and stay in memory, so you fit more into the same RAM. No disk, no file and no partition is involved anywhere in the zram path.</dd>
+
+    <dt>zswap</dt>
+    <dd>A compressed cache that sits in front of a real disk swap partition. Pages are compressed on their way out, and cold ones are written through to the disk in the background. Once the cache is full it stops accepting, and pages go straight to disk until it drains again. It is not a swap device itself and cannot work without one behind it.</dd>
+  </dl>
+
+  <h3>The two limits</h3>
+  <dl class="glossary">
+    <dt><code>zram-size</code> &mdash; the ceiling</dt>
+    <dd><strong>This is not disk space of any kind.</strong> It is a ceiling on how much compressed data the zram device may hold, and all of that data lives in RAM. The name is misleading, and the kernel's own name for the attribute underneath (<code>disksize</code>) is worse. There is no disk, no file and no partition anywhere in this path. Treat it as a number, not as storage.</dd>
+
+    <dt><code>zram-resident-limit</code> &mdash; the budget</dt>
+    <dd>The real cap on how much actual RAM the compressed pool may ever occupy. This is the limit that protects the machine. It maps directly onto the kernel's <code>/sys/block/zramN/mem_limit</code>.</dd>
+  </dl>
+</div>
+
+<!-- THE MODEL -->
+<div class="docs-section" id="model">
+  <h2>The model: a ceiling and a budget</h2>
+  <p>Everything else on this page follows from one idea. zram is given two separate limits that do two different jobs.</p>
+  <p>The first is a <strong>ceiling</strong>: how much compressed data the device may hold. It is generous. It is also just a number &mdash; nothing is allocated because of it, and no storage of any kind is reserved.</p>
+  <p>The second is a <strong>budget</strong>: how much actual RAM the compressed pool may ever occupy. It is tight, and it is real. This is the one that protects the machine.</p>
+  <p>Because the budget does the safety work, the ceiling costs nothing. Setting it generously gives compression room to stretch on a machine whose pages happen to compress well, without exposing the machine to any risk if they do not.</p>
+
+  <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine at level 4G, the ceiling (the zram-size setting) is 4 GiB and bounds how much compressed data the device may hold. It is a number only, with no disk, file or partition behind it. The budget (the zram-resident-limit setting) is 35 percent of RAM, or 1.4 GiB, and bounds how much real RAM the compressed pool may occupy. Whichever limit is reached first is the one that stops you: pages that compress well hit the ceiling, pages that compress badly hit the budget, and both outcomes are bounded and safe."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
+
+  ┌───────────────────────────────────────────────────────────┐
+  │  CEILING     zram-size = ram                    4 GiB     │
+  │                                                           │
+  │  How much compressed data the device may hold.            │
+  │  A number only. No disk, no file, no partition.           │
+  │  Reaching it means: the device is full, swap is full.     │
+  └───────────────────────────────────────────────────────────┘
+                        │
+                        │  all of it actually living in
+                        ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  BUDGET      zram-resident-limit = 35% of RAM   1.4 GiB   │
+  │                                                           │
+  │  How much real RAM the compressed pool may occupy.        │
+  │  Enforced by the kernel. This is the real protection.     │
+  │  Reaching it means: no more pages accepted, same as full. │
+  └───────────────────────────────────────────────────────────┘
+
+  Whichever limit is reached first is the one that stops you.
+  Pages that compress well hit the ceiling. Pages that compress
+  badly hit the budget. Both outcomes are bounded and safe.</code></pre>
+
+  <h3>What each one protects against</h3>
+  <ul>
+    <li><strong>The ceiling protects against unbounded swap.</strong> Without it, the kernel would keep handing pages to a device with no stated capacity. A bounded absorber followed by a timely out-of-memory decision is better than an unbounded one followed by a slow death.</li>
+    <li><strong>The budget protects against the compressed pool eating the machine.</strong> Compressed pages are still RAM. Without a cap, badly-compressing data could grow the pool until the thing meant to relieve memory pressure becomes the cause of it.</li>
+  </ul>
+
+  <h3>Is swapping to zram bad?</h3>
+  <p>No. Parking cold pages in compressed RAM is the design working as intended. The instinct that swap-in-use is a red flag comes from disk swap, where every touched page costs a real disk read. zram swap is still RAM. It is closer to "this data got compressed" than to "this data left memory".</p>
+  <p>Watch stall time and the rate of out-of-memory kills. Do not watch swap-used percentage.</p>
+</div>
+
+<!-- QUICK START -->
+<div class="docs-section" id="quick-start">
+  <h2>Quick start</h2>
+  <p><strong>1. Find your level.</strong> Run this on the machine you are configuring. It reads the real RAM total from <code>/proc/meminfo</code> and prints a line to paste.</p>
+  <pre><code>nix run github:julian-corbet/nixram-corbet-ch#detect-level</code></pre>
+
+  <p><strong>2. Add the flake input.</strong></p>
+  <pre><code>inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";</code></pre>
+
+  <p><strong>3. Import the module and declare the level.</strong></p>
+  <pre><code>imports = [ inputs.nixram.nixosModules.nixram ];
+
+services.nixram = {
+  enable = true;
+  level = "4G";
+};</code></pre>
+
+  <p>That is the whole configuration. There is no build-time detection and no default level: Nix builds cannot read the target machine's live memory, so the level is a fact you detect once and commit, like a disk UUID. Enabling the module without a level is a hard build error with a message pointing at the fix.</p>
+
+  <p><strong>On a laptop with a swap partition you keep</strong>, or one that hibernates to it, add the zswap mode instead. It needs at least one entry in <code>swapDevices</code>, and it takes effect on the next boot rather than on rebuild.</p>
+  <pre><code>services.nixram = {
+  enable = true;
+  level = "16G";
+  mode = "zswap";
+};</code></pre>
+
+  <p><strong>To check it came up</strong>, on a zram machine:</p>
+  <pre><code>zramctl                       # the device, its algorithm, and what it holds
+swapon --show                 # zram at priority 100, above any disk swap
+systemctl status systemd-oomd # the watchdog, where the level arms it</code></pre>
+</div>
+
+<!-- LEVELS TABLE -->
+<div class="docs-section" id="levels">
+  <h2>The full level table</h2>
+  <p>Fourteen anchor sizes. Every value below is an expression, not a baked-in number: <code>ram</code> is zram-generator's own variable for the machine's total detected RAM in MiB, evaluated against the real <code>/proc/meminfo</code> at boot. A machine that rounds up to a larger anchor still computes from its own true RAM.</p>
+
+  <h3>What the marks mean</h3>
+  <ul>
+    <li><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> <strong>Cited.</strong> Taken from someone else's published work &mdash; a distribution's shipped default, upstream documentation, or the tool's own worked example &mdash; and applied as it stands. Somebody outside this project already made the case for it.</li>
+    <li><abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <strong>Our own reasoning, not yet measured.</strong> nixram picked this value by argument, not by experiment. The argument is written down. The measurement has not been done. These are tracked as open questions and get upgraded to cited or corrected as results come in.</li>
+    <li><abbr class="mark m-k" title="The kernel's own default, untouched">K</abbr> <strong>The kernel's own default, untouched.</strong> nixram deliberately sets nothing here and lets the kernel's computed or shipped value stand.</li>
+  </ul>
+
+  <div class="table-scroll">
+    <table class="level-table wide-table">
+      <thead>
+        <tr>
+          <th scope="col">Level</th>
+          <th scope="col">Ceiling<br><code>zram-size</code></th>
+          <th scope="col">Budget<br><code>zram-resident-limit</code></th>
+          <th scope="col">Compression</th>
+          <th scope="col">Recompression</th>
+          <th scope="col">Reclaim start<br><code>watermark_scale_factor</code></th>
+          <th scope="col">Watchdog</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">256M</th>
+          <td><code>ram * 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>ram / 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd(level=1)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>off <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>off <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">512M</th>
+          <td><code>ram * 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>ram / 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">1G</th>
+          <td><code>ram * 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>ram / 2</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">2G</th>
+          <td><code>ram</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">4G</th>
+          <td><code>ram</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">6G</th>
+          <td><code>ram</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">8G</th>
+          <td><code>ram</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">10G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">12G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">16G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">24G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">32G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>35% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">64G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>unset, on purpose <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>100 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+        <tr>
+          <th scope="row">128G</th>
+          <td><code>min(ram / 2, 16384)</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>unset, on purpose <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td><code>zstd</code> <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>100 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+          <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Where a single cell carries both marks, part of the expression is cited and part is not. On the rows where the ceiling switches to half of RAM &mdash; the taper, from 10G upward &mdash; the <code>/2</code> shape is our own reasoning and the 16 GiB cap it approaches is Pop!_OS's shipped ceiling. On the 64G and 128G rows the cap is the only part that ever binds, so in practice you get the cited number, but the expression around it is still ours.</p>
+  <p>Note that the watchdog being <em>on</em> above 256M is our own judgement, not a cited one. What is cited is the threshold it fires at (60% for 30 s), listed under <a href="#constants">Shared settings</a>.</p>
+  <p>The values above are transcribed by hand from the module's own level table in <code>levels.nix</code>. Both this page and the copy in the repository documentation can drift away from it. Where they disagree, <code>levels.nix</code> is the source of truth.</p>
+
+  <h3>Rounding up is safe, with one exception</h3>
+  <p>The detector rounds up to the next anchor, never down. That is safe because every value is an expression evaluated against the machine's real RAM at boot. A 20 GiB machine assigned to the 24G level still computes from its real 20 GiB. A machine larger than 128 GiB is assigned the 128G level, because there is nothing above it, and the expressions still compute from its real RAM.</p>
+  <p>The one real consequence is rounding <em>into</em> the 64G tier. Any machine above 32 GiB and up to 64 GiB lands there, and that tier has no budget set. On a 33 GiB machine that means a 16 GiB ceiling &mdash; roughly 48% of RAM &mdash; with nothing capping the pool behind it. If you want the 35% budget kept, set <code>zram.residentLimitOverride</code> explicitly.</p>
+</div>
+
+<!-- PER TIER -->
+<div class="docs-section" id="tiers">
+  <h2>Why each tier is shaped this way</h2>
+  <p>Read the 4G block first. Every other tier is that one with a scarcity turned up or down.</p>
+
+  <div class="explainer-grid">
+    <div class="explainer-card">
+      <span class="kicker">256M</span>
+      <h3>The survival tier</h3>
+      <p>Two things are scarce at once: RAM, and the CPU needed to compress it. The ceiling is twice RAM because compression is the only headroom this machine will ever get. The budget at half of RAM caps how much of that reach can ever become real spend.</p>
+      <p>Compression uses zstd's cheapest setting rather than plain zstd, because every page fault costs CPU on a machine that has almost none. The watchdog is off: the memory the daemon itself occupies is an unmeasured fraction of a very small total, so the kernel's own killer plus the protected-unit layer stands guard alone.</p>
+      <p>Recompression is off too. A pool topping out around 512 MiB of addressable data cannot repay a second pass.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">512M</span>
+      <h3>The first full-strength tier</h3>
+      <p>Same shape as 256M &mdash; twice RAM as the ceiling, half of RAM as the budget &mdash; but nothing has to be rationed twice anymore.</p>
+      <p>Plain zstd is affordable. The watchdog is armed, because its own footprint is a far smaller fraction of the machine here. The daily recompression pass starts paying: tens of MB recovered, on a machine where tens of MB are percent-of-RAM money.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">1G</span>
+      <h3>The small-box shape, last time</h3>
+      <p>Double-RAM reach, half-of-RAM budget. Below this size the machine lives or dies on how far compression stretches.</p>
+      <p>Reclaim starts early across all three small tiers, at 200. Any fixed percentage of a tiny memory zone is a tiny absolute number of free pages, so background reclaim has to begin sooner to leave real headroom.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">2G</span>
+      <h3>Where the sourced middle begins</h3>
+      <p>The ceiling drops to plain <code>ram</code>, all of RAM. This is Fedora's own shipped default and the best-cited point on the whole curve.</p>
+      <p>The budget tapers from half to 35%. With multiple GB present, the compressed pool no longer needs to be allowed half the machine to be useful. Reclaim relaxes to 150.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">4G</span>
+      <h3>The reference tier</h3>
+      <p>The most ordinary row in the table. The ceiling is cited from Fedora, the budget is the standard 35%, and every shared constant sits at its normal value.</p>
+      <p>If you want to understand any other tier, understand this one and then note what changed.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">6G &amp; 8G</span>
+      <h3>The same row, with more slack</h3>
+      <p>Nothing changes but the numbers the same expressions resolve to. 8G is the last tier where a ceiling equal to the whole machine is still the right answer. That is also where Fedora's own default stops scaling &mdash; it caps at <code>min(ram, 8192)</code>.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">10G</span>
+      <h3>Where the taper begins</h3>
+      <p>The ceiling switches to half of RAM, capped at 16 GiB, which is 5 GiB of reach on a 10 GiB machine. The need for swap capacity stops scaling with RAM. A 10 GiB machine under pressure does not want 10 GiB of swap. It wants a bounded absorber, and then a timely out-of-memory decision.</p>
+      <p>The halving binds through 32G, and the cap waits its turn. Reclaim reaches 125, the one value a distribution actually validated.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">12G &middot; 16G &middot; 24G</span>
+      <h3>The plateau</h3>
+      <p>The taper walks the ratio down: 6 GiB of reach on a 12 GiB machine, 8 on 16, 12 on 24. A shrinking fraction of a growing machine, all inside the same 35% budget.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">32G</span>
+      <h3>Where taper meets cap</h3>
+      <p>32 divided by 2 is 16. This is the one tier where the halving and the 16 GiB cap agree exactly. Above this line the cap alone rules, and RAM size stops mattering to the absorber.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">64G</span>
+      <h3>Where the budget retires</h3>
+      <p>The budget is deliberately unset. At the anchor size the ceiling is already 25% of RAM or less, a tighter bound than the 35% rule would produce, so a second cap would be decoration rather than protection. Below the anchor it is a larger fraction &mdash; on a 33 GiB machine, roughly 48% &mdash; which is why the rounding caveat above matters. This is flagged as an open question, not as something proven.</p>
+      <p>Reclaim eases to 100. For a machine running one huge workload that does not swap usefully, the honest alternative is <code>mode = "none"</code>: watchdog and kernel settings, no swap medium at all.</p>
+    </div>
+
+    <div class="explainer-card">
+      <span class="kicker">128G</span>
+      <h3>The cap is the whole story</h3>
+      <p>16 GiB of absorber on a machine with eight times that much RAM. zram at this scale is not survival. It is a parking lot for cold pages that would otherwise squat on hot RAM for months of uptime.</p>
+      <p>Everything else is as 64G.</p>
+    </div>
+  </div>
+</div>
+
+<!-- CONSTANTS -->
+<div class="docs-section" id="constants">
+  <h2>Shared settings</h2>
+
+  <h3>The zram profile</h3>
+  <p>These hold at every level <em>when <code>mode = "zram"</code></em>. They are properties of the swap medium, not of the machine, which is why they do not vary by level. Under <code>mode = "zswap"</code> the swap-related ones differ, and under <code>mode = "none"</code> they are left alone entirely.</p>
+
+  <div class="table-scroll">
+    <table class="level-table wide-table">
+      <thead>
+        <tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Where it comes from</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row"><code>vm.swappiness</code></th>
+          <td>180</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> The range used to stop at 100. The kernel extended it to 200, with a documented cost model. Values above 100 are explicitly sanctioned where swapping a page in is cheaper than re-reading it from disk. Pop!_OS ships 180 on zram systems. Open question 003 asks whether it beats 100 or 150 under sustained server pressure.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.page-cluster</code></th>
+          <td>0</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> Read-ahead exists to amortise a disk seek. zram has no seek. Reading extra pages only adds latency and wasted decompression, so nixram turns read-ahead off.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.watermark_boost_factor</code></th>
+          <td>0</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> Pop!_OS.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.watermark_scale_factor</code></th>
+          <td>200 / 150 / 125 / 100 by tier</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> for 125, the one flat value Pop!_OS validated. <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> for the other three, which are nixram's own taper connecting to that anchor. Small machines need reclaim to start earlier, because any fixed percentage of a small zone is a small absolute number of pages. Very large machines need the opposite, and 100 suffices.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.min_free_kbytes</code></th>
+          <td>untouched</td>
+          <td><abbr class="mark m-k" title="The kernel's own default, untouched">K</abbr> The kernel's own computed value stands. No distribution default or kernel document reviewed offers a universal per-GB formula that holds across a 256M to 128G range, so nixram declines to invent one. <code>minFreeKbytesOverride</code> exists as a manual hatch; no level uses it.</td>
+        </tr>
+        <tr>
+          <th scope="row">MGLRU <code>min_ttl_ms</code></th>
+          <td>1000</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> but flagged. The kernel documentation offers 1000 ms as its example value, and frames the setting as guidance for people who do <em>not</em> have an out-of-memory watchdog running. nixram runs it alongside one instead, as a complementary layer. That interaction over months of uptime is unmeasured. Applied through a systemd-tmpfiles rule, not a sysctl. It does nothing if MGLRU is not compiled into your kernel: it will not fail your boot, but it does leave a log line if you go looking.</td>
+        </tr>
+        <tr>
+          <th scope="row">Swap priority</th>
+          <td>100</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> zram-generator's own upstream default, set deliberately above typical disk-swap priorities so the kernel always prefers zram where both exist.</td>
+        </tr>
+        <tr>
+          <th scope="row">Watchdog trigger</th>
+          <td>60% pressure for 30 s</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> systemd-oomd's own upstream defaults, unmodified. Set explicitly rather than through the built-in <code>enableSystemSlice</code> / <code>enableUserSlices</code> helpers, which hardcode 80% with no control over duration &mdash; purely so per-level tuning stays possible later.</td>
+        </tr>
+        <tr>
+          <th scope="row">Compression</th>
+          <td><code>zstd</code>, or <code>zstd(level=1)</code> at 256M</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> for choosing zstd: it is Fedora's zram default and zram-generator's own worked example. <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> for the cheap setting at 256M, which trades ratio for cycles on a tier that is as CPU-starved as it is memory-starved.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Where the watchdog is armed</h3>
+  <p>The pressure thresholds are applied to <code>-.slice</code>, which covers the whole system, and <code>user.slice</code>, the parent of every logged-in user's session. nixram also points <code>systemd.oomd.enable</code> at its own <code>oomd.enable</code> with <code>mkDefault</code>, in both directions. That matters at 256M, where nixpkgs would otherwise leave the daemon running &mdash; its memory cost is the entire reason that tier disarms it.</p>
+  <p><strong>Deliberately absent:</strong> <code>SwapUsedLimit</code> and <code>ManagedOOMSwap</code>, the triggers that fire on a swap-used percentage. Such a percentage would be measured against the generous ceiling, which is larger than the real budget on purpose. It would read "plenty of headroom" right up to the moment the real wall is hit. They are not configured at all, not even as a decorative backstop.</p>
+
+  <h3>Protected units</h3>
+  <p><code>oomd.protectedUnits</code> defaults to <code>[ "sshd.service" ]</code> and gets two independent layers, both applied at every level regardless of whether the watchdog is enabled:</p>
+  <ul>
+    <li><code>ManagedOOMPreference = "omit"</code> tells the userspace watchdog to leave the unit alone.</li>
+    <li><code>OOMScoreAdjust = -900</code> tells the kernel's own last-resort killer to pick this process last. This is the layer that still protects the unit when the watchdog is off, absent, or too slow to matter.</li>
+  </ul>
+  <p>Name only services that actually exist. A name matching nothing will materialise a skeleton unit. The <code>.service</code> suffix is accepted and normalised away.</p>
+
+  <h3>The zswap profile</h3>
+  <p>Two things to know before choosing this mode. It requires a real swap device &mdash; <code>mode = "zswap"</code> asserts that <code>config.swapDevices</code> is not empty, because zswap is a cache in front of disk swap, not a swap device itself. And it takes effect on the <strong>next boot only</strong>. These settings are kernel command-line parameters, off by default upstream, so <code>nixos-rebuild switch</code> alone does not retroactively enable zswap on a running kernel. That is a limitation of the mechanism, not a shortcut nixram took.</p>
+
+  <div class="table-scroll">
+    <table class="level-table wide-table">
+      <thead>
+        <tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Where it comes from</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row"><code>max_pool_percent</code></th>
+          <td>20</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> The kernel's own default, deliberately not raised. Unlike zram's ceiling, the zswap pool competes directly with the same RAM your applications are using, not with disk I/O time. A bigger pool has a real and immediate opportunity cost, so nixram does not extrapolate past the cited value here.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>accept_threshold_percent</code></th>
+          <td>90</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> Upstream default. Once the pool fills to its ceiling it stops accepting pages, and must drain back to 90% of that ceiling before it resumes. This is what stops it flapping on and off right at the boundary.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zpool</code></th>
+          <td><code>zsmalloc</code></td>
+          <td>Hardcoded, no selector offered. z3fold and zbud have been removed from current kernels, so a selector would only offer dead configuration.</td>
+        </tr>
+        <tr>
+          <th scope="row">Compressor</th>
+          <td><code>zstd</code></td>
+          <td>Hardcoded, matching the zram side.</td>
+        </tr>
+        <tr>
+          <th scope="row">Shrinker</th>
+          <td>on</td>
+          <td><abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> Upstream ships it off. nixram turns it on. It proactively writes cold zswap pages back to the real disk swap under pressure, rather than waiting for the pool to fill and block. A reasoned deviation, not a cited recommendation. Requires Linux 6.8 or newer. Unrecognised kernel parameters are ignored with a log warning on older kernels, so passing it is always safe.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.swappiness</code></th>
+          <td>120</td>
+          <td><abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> zram gets 180 because it is uniformly cheap. zswap is only partly cheap: a cache hit is RAM-speed decompression, a cache miss is a real disk read. 120 is a reasoned midpoint between the plain-disk kernel default of 60 and zram's 180. It has not been benchmarked.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.page-cluster</code></th>
+          <td>2 on SSD; untouched on HDD</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> Pop!_OS makes this distinction. Note that nixram does not set 3 for a spinning disk &mdash; it sets nothing at all and leaves the kernel's own default standing.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>vm.watermark_scale_factor</code></th>
+          <td>125, flat at every RAM size</td>
+          <td><abbr class="mark m-c" title="Cited from someone else's published work">C</abbr> Not the zram table's taper. The taper's justification is about absorbing sustained pressure on long-running server workloads. A laptop's pressure episodes are shorter and interactive, so that justification does not transfer.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3><code>mode = "none"</code></h3>
+  <p>Leaves swappiness and read-ahead untouched entirely, because there is no managed swap medium to have an opinion about. Still applies the reclaim watermarks, the MGLRU setting, the watchdog, and the protected-unit layers.</p>
+
+  <h3>Overriding any of it</h3>
+  <p>Every sysctl assignment uses <code>mkDefault</code>, so your own configuration can override any single one by simply assigning it &mdash; no <code>lib.mkForce</code> needed. <code>sysctls.enable = false</code> turns the whole kernel-settings layer off while keeping the swap device and watchdog wiring intact.</p>
+</div>
+
+<!-- OPTIONS -->
+<div class="docs-section" id="options">
+  <h2>Option reference</h2>
+  <p>All under <code>services.nixram.</code></p>
+
+  <div class="table-scroll">
+    <table class="level-table wide-table">
+      <thead>
+        <tr><th scope="col">Option</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row"><code>enable</code></th><td>bool</td><td><code>false</code></td>
+          <td>Turns the module on. All configuration is gated on it.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>level</code></th><td>null or enum</td><td><code>null</code></td>
+          <td>One of 256M, 512M, 1G, 2G, 4G, 6G, 8G, 10G, 12G, 16G, 24G, 32G, 64G, 128G. No default by design. Leaving it unset while enabled is a hard build error with a message pointing at the fix, not a silent fallback.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>mode</code></th><td>enum</td><td><code>"zram"</code></td>
+          <td><code>"zram"</code>, <code>"zswap"</code> or <code>"none"</code>. Exactly three values, so zram and zswap cannot be combined by accident. <code>"zswap"</code> asserts that <code>config.swapDevices</code> is not empty.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.sizing</code></th><td>enum</td><td><code>"both"</code></td>
+          <td><code>"virtual"</code> sets only the ceiling. <code>"physical"</code> sets only the budget, and the ceiling falls back to zram-generator's own default of <code>min(ram / 2, 4096)</code>. <code>"both"</code> sets both keys.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.diskSizeOverride</code></th><td>null or string</td><td><code>null</code></td>
+          <td>Overrides the level's ceiling expression. Uses zram-generator's expression syntax, for example <code>"ram"</code> or <code>"min(ram / 2, 8192)"</code>. Still not disk space &mdash; the name follows the upstream key.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.residentLimitOverride</code></th><td>null or string</td><td><code>null</code></td>
+          <td>Overrides the level's budget expression. <code>"0"</code> means unlimited.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.priorityOverride</code></th><td>null or int (-1 to 32767)</td><td><code>null</code></td>
+          <td>When null, the effective value is the level's priority, which is 100 at every level.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.recompressionAlgorithmOverride</code></th><td>null or string</td><td><code>null</code></td>
+          <td>The second, slower compression setting. Takes a zram algorithm expression.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.recompressionTimer.enable</code></th><td>bool</td><td>from the level: <code>false</code> at 256M, <code>true</code> everywhere else</td>
+          <td>Ships the two-phase systemd timer and its oneshot service.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zram.recompressionTimer.onCalendar</code></th><td>string</td><td><code>"daily"</code></td>
+          <td>A systemd <code>OnCalendar</code> expression. An explicitly unvalidated starting point, not a measured optimum.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zswap.maxPoolPercent</code></th><td>int 1&ndash;100</td><td><code>20</code></td>
+          <td>The kernel's own default, deliberately not raised.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zswap.acceptThresholdPercent</code></th><td>int 1&ndash;100</td><td><code>90</code></td>
+          <td>Upstream default, as a percentage of the pool ceiling.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zswap.shrinkerEnabled</code></th><td>bool</td><td><code>true</code></td>
+          <td>Upstream default is off. Requires Linux 6.8 or newer. It is harmlessly ignored on older kernels.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>zswap.diskMedium</code></th><td>enum</td><td><code>"ssd"</code></td>
+          <td><code>"ssd"</code> sets <code>vm.page-cluster = 2</code>. <code>"hdd"</code> sets nothing and leaves the kernel default standing.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>oomd.enable</code></th><td>bool</td><td>from the level: <code>false</code> at 256M, <code>true</code> everywhere else</td>
+          <td>Arms the pressure thresholds on <code>-.slice</code> and <code>user.slice</code>. Also sets <code>systemd.oomd.enable</code> through <code>mkDefault</code>, in both directions.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>oomd.protectedUnits</code></th><td>list of string</td><td><code>[ "sshd.service" ]</code></td>
+          <td>Applied at every level regardless of <code>oomd.enable</code>. Sets both <code>ManagedOOMPreference = "omit"</code> and <code>OOMScoreAdjust = -900</code>. The <code>.service</code> suffix is normalised away. Naming a service that does not exist materialises a skeleton unit.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>sysctls.enable</code></th><td>bool</td><td><code>true</code></td>
+          <td><code>false</code> disables the whole kernel-settings and MGLRU layer while keeping the zram/zswap and watchdog wiring.</td>
+        </tr>
+        <tr>
+          <th scope="row"><code>minFreeKbytesOverride</code></th><td>null or positive int</td><td><code>null</code></td>
+          <td>An escape hatch only. No level sets <code>vm.min_free_kbytes</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Also part of the surface</h3>
+  <ul>
+    <li>Flake outputs: <code>nixosModules.nixram</code> and <code>nixosModules.default</code>, the <code>detect-level</code> app, and <code>checks</code>.</li>
+    <li>Supported systems: <code>x86_64-linux</code> and <code>aarch64-linux</code>.</li>
+  </ul>
+
+  <h3>Not exposed as options</h3>
+  <p>Some values are level data or hardcoded rather than user-facing: the first-pass compression algorithm (level-only &mdash; only the recompression algorithm has an override), <code>zswap.zpool</code> and <code>zswap.compressor</code> (hardcoded), and the watchdog's pressure limit and duration (level data, 60% for 30 s everywhere).</p>
+  <p>The kernel settings themselves &mdash; <code>vm.swappiness</code>, <code>vm.page-cluster</code>, the watermark pair and MGLRU's dwell time &mdash; have no nixram option either, but all use <code>mkDefault</code>, so you override them directly from your own configuration instead.</p>
+
+  <h3>One implementation note</h3>
+  <p>Because <code>level</code> has no default, no part of the module ever indexes the level table with it directly. Everything goes through an internal value that falls back to an arbitrary valid level when it is null. A real user never sees that fallback. It exists only so that forcing unrelated parts of your configuration cannot crash evaluation before the friendly assertion gets a chance to speak.</p>
+</div>
+
+<!-- SECURITY -->
+<div class="docs-section" id="security">
+  <h2>Security</h2>
+  <p>nixram runs no network service and opens no port. What it does affect is which processes survive when the machine runs out of memory, so these are the concrete guarantees:</p>
+  <ul>
+    <li><strong>Your SSH daemon is protected by two independent layers</strong>, at every level, whether or not the watchdog is enabled. <code>ManagedOOMPreference = "omit"</code> tells the userspace watchdog to skip it; <code>OOMScoreAdjust = -900</code> tells the kernel's own killer to pick it last. The second keeps working when the first is off, absent, or too slow.</li>
+    <li><strong>The watchdog fires on stall time, not on a percentage.</strong> A swap-used percentage measured against the generous ceiling would read "plenty of headroom" right up to the real wall, so those triggers are not configured at all.</li>
+    <li><strong>No daemon of nixram's own sits in the memory path.</strong> The only unit it ships is a oneshot that runs on a timer at the lowest CPU and I/O priority and then exits.</li>
+    <li><strong>Nothing is silently guessed.</strong> Enabling the module without a level fails the build with a message. Choosing zswap without a real swap device fails the build with a message.</li>
+    <li><strong>The compressed pool is bounded by the kernel</strong>, through <code>zram-resident-limit</code>, at every level except 64G and 128G, where the ceiling is the bound instead.</li>
+  </ul>
+  <p>If you find a problem with any of this, open an issue at <a href="https://github.com/julian-corbet/nixram-corbet-ch/issues">github.com/julian-corbet/nixram-corbet-ch/issues</a>. There is no private disclosure channel, because there is no network surface to disclose against.</p>
+</div>
+
+<!-- JUDGEMENT CALLS -->
+<div class="docs-section" id="decisions">
+  <h2>The judgement calls</h2>
+  <p>What was chosen, what the alternative was, and what would change our mind.</p>
+
+  <h3>Exceeding upstream's recommended sizing</h3>
+  <p>zram-generator's own documentation recommends sizing zram to somewhere between 0.1 and 0.5 of RAM. nixram's small and mid tiers deliberately exceed that, up to twice RAM at the smallest. The taper and cap bring it back to 0.5 of RAM and below by the large tiers &mdash; 0.25 at 64G, 0.125 at 128G.</p>
+  <p><strong>Why we think that is defensible.</strong> That guidance is written for setups where the ceiling is the <em>only</em> ceiling. nixram's default pairs it with a real memory budget that does the actual safety work. <strong>The catch:</strong> if you set <code>zram.sizing = "virtual"</code> you have stepped outside that net, and the 0.1&ndash;0.5 caution applies to you again in full.</p>
+  <p><strong>What would change our mind:</strong> evidence that a generous ceiling causes harm even with a budget enforced behind it.</p>
+
+  <h3>No budget at 64G and above</h3>
+  <p>The reasoning is that at those anchor sizes the ceiling is already 25% of RAM or less, tighter than the 35% rule would produce, so a second cap would be decoration. That holds at the anchors. It does not hold for a machine that rounded up into the tier &mdash; see the rounding caveat above. <strong>The alternative</strong> was keeping 35% everywhere for uniformity.</p>
+  <p><strong>What would change our mind:</strong> a case where a large machine's pool grows past 25% of RAM in practice. This is flagged as an open question, not as settled.</p>
+
+  <h3>The watchdog is off at 256M</h3>
+  <p>The daemon carries its own memory cost, which is a meaningfully larger fraction of a 256 MiB machine than of any larger tier. <strong>What this gives up:</strong> the early-warning layer. It does not disable the kernel's own out-of-memory killer, and the protected-unit layer still applies.</p>
+  <p><strong>What would change our mind:</strong> a measurement of that cost. It is currently unmeasured, which is precisely why the choice is marked as our own reasoning rather than cited. Note that the reverse choice &mdash; arming the watchdog at every larger tier &mdash; is equally our own reasoning. What is cited is the threshold, not the on/off decision.</p>
+
+  <h3>The recompression setting</h3>
+  <p>Two limits argue against going dense here. A 4 KiB page is too small for the long-range matching that high zstd settings earn their cost with, so the ratio gain collapses. And in the low teens the encoder switches to optimal-parser strategies, a several-fold cost cliff. nixram picks the densest setting below that cliff.</p>
+  <p>The current pick is zstd compression strength 12.</p>
+  <p><strong>No source recommends a specific setting here.</strong> This is nixram's own choice. <strong>What would change our mind:</strong> the sweep defined as open question 004 below.</p>
+
+  <h3>The two-phase recompression timer</h3>
+  <p>One run repacks whatever the previous run marked as untouched and that has stayed untouched since. Then it marks the current set for the next run. Mechanically: phase one writes <code>type=idle</code> to the recompression control, phase two writes <code>all</code> to the idle control.</p>
+  <p><strong>The alternative</strong> was a single-phase design, which would recompress the entire device every run &mdash; everything looks untouched in the instant right after being marked. The kernel clears a page's untouched flag the moment it is written again, which is what makes the dwell period real.</p>
+  <p>The service runs at the lowest scheduling priority for both CPU and I/O, deliberately kept out of the way of the exact symptom it exists to prevent. The timer is persistent, so a missed run catches up.</p>
+  <p><strong>Requirements:</strong> Linux 6.2 or newer with <code>CONFIG_ZRAM_MULTI_COMP</code>. The script checks for the kernel control file first. If it is absent it logs one explanatory line and exits cleanly &mdash; it does not fail the timer or the boot.</p>
+
+  <h3>Recompression stays on at 64G and 128G</h3>
+  <p>The honest reason is consistency with every other tier, not a measurement showing it pays there. The marginal value is genuinely low: the pool is capped at 16 GiB regardless of RAM, and RAM is plentiful. For a machine running one big workload that does not swap usefully, the documented alternative is <code>mode = "none"</code>.</p>
+
+  <h3>Non-goals</h3>
+  <ul>
+    <li>No build-time RAM auto-detection. Nix builds cannot read the target machine's live memory, so the level is a fact you detect once and commit, like a disk UUID.</li>
+    <li>No stacking of zram and zswap. That means compressing the same page twice, and nobody has published a measurement showing it helps.</li>
+    <li>No swap-percentage watchdog triggers anywhere.</li>
+    <li>No universal <code>vm.min_free_kbytes</code> formula.</li>
+    <li>Not a container or cgroup memory manager. Host level only.</li>
+  </ul>
+
+  <h3>Open questions</h3>
+  <p>Four experiments are defined in the repository. None of them has published a result yet. Results feed back into the table as marker upgrades or corrections.</p>
+
+  <div class="table-scroll">
+    <table class="level-table wide-table">
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Question</th><th scope="col">What it decides</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">001</th><td>How much memory does systemd-oomd itself occupy on a 256 MiB machine?</td><td>Whether the watchdog should stay off at the smallest tier.</td></tr>
+        <tr><th scope="row">002</th><td>How often should the recompression pass run? Hourly, every six hours, daily, or every three days.</td><td>The default schedule, measured as bytes recovered per CPU-second.</td></tr>
+        <tr><th scope="row">003</th><td>Swappiness swept across 100, 150 and 180 under sustained server pressure.</td><td>Whether 180 is right for servers, or only for the desktop workloads it was validated on.</td></tr>
+        <tr><th scope="row">004</th><td>Recompression strength swept across 3, 6, 9, 12, 15 and 19 against real page populations.</td><td>The recompression setting, and whether the second pass is worth running at all.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Being visibly unfinished where the work is unfinished is the point. A value marked as our own reasoning is not a value we are hiding &mdash; it is one we have not yet earned the right to call settled.</p>
+</div>
+
+<!-- GLOSSARY -->
+<div class="docs-section" id="glossary">
+  <h2>Glossary</h2>
+  <p>Every term used on this page, in plain words. The two mechanisms and the two limits are defined <a href="#essentials">near the top</a>, where you need them first.</p>
+
+  <h3>Tools and modules</h3>
+  <dl class="glossary">
+    <dt>zram-generator</dt>
+    <dd>The upstream systemd tool that actually creates and configures the zram device. nixram writes its configuration rather than implementing a device of its own.</dd>
+
+    <dt><code>zramSwap</code> (the built-in NixOS module)</dt>
+    <dd>The older NixOS option set for zram. nixram deliberately does not use it. It can only set the virtual size and has no concept of a real memory budget, which is the mechanism nixram's whole model depends on. nixpkgs itself documents zram-generator as the intended successor.</dd>
+  </dl>
+
+  <h3>What the kernel is doing</h3>
+  <dl class="glossary">
+    <dt>page</dt>
+    <dd>The fixed-size chunk the kernel moves memory around in. On the machines nixram targets it is 4 KiB.</dd>
+
+    <dt>reclaim</dt>
+    <dd>The kernel taking memory back from one thing so it can give it to another. Background reclaim is the kernel doing this ahead of time, quietly, before anything is actually blocked.</dd>
+
+    <dt>page fault</dt>
+    <dd>What happens when a process touches a page of memory that is not currently in RAM and the kernel has to fetch it back.</dd>
+
+    <dt>thrashing</dt>
+    <dd>The machine spending so much of its time moving pages in and out that useful work effectively stops.</dd>
+
+    <dt>OOM / the OOM killer</dt>
+    <dd>Out of memory. The kernel's last-resort response to running out: it picks a process and kills it. It has no idea which process you cared about.</dd>
+
+    <dt>systemd-oomd</dt>
+    <dd>An out-of-memory watchdog running in userspace. It watches for trouble and acts <em>before</em> the kernel's last-resort killer has to, which means the choice of what dies is made with more information and less panic.</dd>
+
+    <dt>PSI / pressure stall information</dt>
+    <dd>The kernel's own measurement of how long processes actually sat blocked waiting on memory. Stall time, in other words. It is a direct measure of the symptom you care about, unlike a percentage of some capacity.</dd>
+
+    <dt>cgroup / slice / <code>-.slice</code> / <code>user.slice</code></dt>
+    <dd>The systemd hierarchy that resources are accounted against. <code>-.slice</code> is the root, covering the whole system. <code>user.slice</code> is the parent of every logged-in user's session. These are the two places nixram arms the watchdog.</dd>
+  </dl>
+
+  <h3>The kernel settings nixram touches</h3>
+  <dl class="glossary">
+    <dt>sysctl</dt>
+    <dd>Kernel settings that can be changed at runtime. The memory ones are all named <code>vm.something</code>.</dd>
+
+    <dt><code>vm.swappiness</code></dt>
+    <dd>How eagerly the kernel moves pages to swap rather than dropping cached file data instead. Higher means swap sooner. The range now goes to 200, not 100 &mdash; the kernel explicitly sanctions values above 100 where swapping beats re-reading from disk.</dd>
+
+    <dt><code>vm.page-cluster</code></dt>
+    <dd>How many pages the kernel reads ahead when one swapped page is faulted back in. Its entire justification is amortising a disk seek across several pages at once.</dd>
+
+    <dt><code>vm.watermark_scale_factor</code></dt>
+    <dd>How much earlier the kernel starts reclaiming in the background, measured against a memory zone's free-page thresholds. Higher means start earlier and keep more headroom.</dd>
+
+    <dt><code>vm.watermark_boost_factor</code></dt>
+    <dd>A related setting that temporarily raises those thresholds after memory fragmentation events. nixram sets it to 0.</dd>
+
+    <dt><code>vm.min_free_kbytes</code></dt>
+    <dd>How much RAM the kernel keeps permanently in reserve. nixram deliberately does not touch this one.</dd>
+
+    <dt>MGLRU / multi-generational LRU</dt>
+    <dd>A newer kernel algorithm for deciding which pages are cold. It sorts pages into generations by age rather than one long list.</dd>
+
+    <dt><code>min_ttl_ms</code></dt>
+    <dd>A minimum dwell time before MGLRU is allowed to act on a generation of pages. It exists to stop the machine thrashing on pages that only just cooled down. It is not a sysctl. It lives in a kernel control file.</dd>
+
+    <dt>systemd-tmpfiles <code>w</code> rule</dt>
+    <dd>The mechanism nixram uses to write that one value, because it has no sysctl name to be set through.</dd>
+
+    <dt><code>boot.kernelParams</code></dt>
+    <dd>Kernel command-line settings, fixed at boot. This matters in exactly one place: zswap is configured through them, so zswap changes only take effect after a reboot.</dd>
+
+    <dt><code>mem_limit</code></dt>
+    <dd>The kernel control file that <code>zram-resident-limit</code> writes to. Only relevant if you are reading kernel documentation alongside this page.</dd>
+  </dl>
+
+  <h3>Compression</h3>
+  <dl class="glossary">
+    <dt>zstd</dt>
+    <dd>The compression algorithm nixram uses everywhere. The fact that matters here: unpacking is essentially as fast no matter how hard the data was packed.</dd>
+
+    <dt>compression vs recompression</dt>
+    <dd>Compression happens on the way in, in the kernel path, while a process waits for the memory. It has to be fast. Recompression happens later, on a schedule, over pages nothing has touched, with nothing waiting on it. It can afford to be slow.</dd>
+
+    <dt><code>CONFIG_ZRAM_MULTI_COMP</code></dt>
+    <dd>The kernel build option that lets zram hold a second, slower compression setting alongside the fast one. Recompression needs it, plus Linux 6.2 or newer.</dd>
+
+    <dt>long-range matching / optimal parser</dt>
+    <dd>The techniques high zstd settings spend their extra time on. Both need a lot of surrounding data to pay off. A 4 KiB page does not give them much to work with, which is why the gain from a denser setting is modest here.</dd>
+
+    <dt>sysfs / <code>/sys/block/zramN/</code></dt>
+    <dd>The kernel control files for a zram device. The recompression timer writes to two of them: one marks pages as untouched, the other tells the kernel to repack the marked ones.</dd>
+  </dl>
+
+  <h3>zswap internals</h3>
+  <dl class="glossary">
+    <dt><code>max_pool_percent</code></dt>
+    <dd>The share of RAM the zswap cache is allowed to occupy.</dd>
+
+    <dt><code>accept_threshold_percent</code></dt>
+    <dd>Once the cache has filled up and stopped accepting pages, this is how far it must drain before it starts accepting again. It exists so the cache does not flap on and off right at the boundary.</dd>
+
+    <dt>shrinker</dt>
+    <dd>A zswap feature that pushes cold compressed pages out to the real disk swap early, rather than waiting for the cache to fill up and block.</dd>
+
+    <dt>zpool / zsmalloc / z3fold / zbud</dt>
+    <dd>The allocator zswap packs compressed pages into. Only zsmalloc still exists in current kernels. The other two have been removed, so there is no choice left to make and nixram offers none.</dd>
+  </dl>
+
+  <h3>Nix terms</h3>
+  <dl class="glossary">
+    <dt>eval-time assertion</dt>
+    <dd>A build-time check that fails with a written message instead of producing a broken system.</dd>
+
+    <dt><code>mkDefault</code> / <code>mkForce</code></dt>
+    <dd>Nix module-system priorities. Values nixram sets with <code>mkDefault</code> can be overridden from your own configuration by simply assigning them, with no ceremony.</dd>
+
+    <dt>anchor level</dt>
+    <dd>nixram's own word for one of the fourteen RAM sizes in its table. Your machine is assigned to the nearest anchor at or above its real RAM.</dd>
+
+    <dt>the taper</dt>
+    <dd>nixram's own word for the rows from 10G upward, where the ceiling stops tracking RAM and switches to half of RAM, capped at 16 GiB.</dd>
+  </dl>
+</div>
+
+<!-- CONTRIBUTING -->
+<div class="docs-section">
+  <h2>Contributing</h2>
+  <p>nixram is MIT licensed. Corrections to the sourcing are as welcome as code &mdash; if a value here is attributed to the wrong place, that is a bug.</p>
+  <pre><code>git clone https://github.com/julian-corbet/nixram-corbet-ch
+cd nixram-corbet-ch
+nix flake check</code></pre>
+  <p>Experiment results are especially welcome. If you have run any of the four open questions above on real hardware, the numbers are worth more than the reasoning they would replace.</p>
+</div>
+
+</main>
+
+<footer>
+  <div class="container">
+    <div class="footer-links">
+      <a href="/">Home</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch">Source</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">Rationale</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md">FAQ</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/tree/main/experiments">Experiments</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/issues">Issues</a>
+    </div>
+    <p>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/LICENSE">MIT</a> &middot;
+      <a href="https://github.com/julian-corbet">Julian Corbet</a> &middot;
+      Built on <a href="https://github.com/systemd/zram-generator">zram-generator</a>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

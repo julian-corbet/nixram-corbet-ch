@@ -3,21 +3,32 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>nixram — level-anchored memory tuning for NixOS</title>
-  <meta name="description" content="One NixOS module: declare a RAM level, get coherent zram/zswap sizing, PSI-armed systemd-oomd, and vm.* sysctls derived from a single table — every value tagged sourced, extrapolated, or kernel default.">
+  <title>nixram &mdash; memory pressure tuning for NixOS, from one declaration</title>
+  <meta name="description" content="A NixOS flake module that sets up compressed memory — zram, or zswap if you prefer — plus an out-of-memory watchdog and the kernel memory settings, from a single line: how much RAM the machine has. Fourteen levels, from a 256 MB VPS to a 128 GB server.">
   <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBiMTEyMCIvPjxyZWN0IHg9IjUiIHk9IjkiIHdpZHRoPSIyMiIgaGVpZ2h0PSIxMiIgcng9IjEiIGZpbGw9IiNFNUEzMkUiLz48cmVjdCB4PSI3LjUiIHk9IjExLjUiIHdpZHRoPSIzLjIiIGhlaWdodD0iNC41IiByeD0iMC42IiBmaWxsPSIjMGIxMTIwIi8+PHJlY3QgeD0iMTIuNCIgeT0iMTEuNSIgd2lkdGg9IjMuMiIgaGVpZ2h0PSI0LjUiIHJ4PSIwLjYiIGZpbGw9IiMwYjExMjAiLz48cmVjdCB4PSIxNy4zIiB5PSIxMS41IiB3aWR0aD0iMy4yIiBoZWlnaHQ9IjQuNSIgcng9IjAuNiIgZmlsbD0iIzBiMTEyMCIvPjxyZWN0IHg9IjIyLjIiIHk9IjExLjUiIHdpZHRoPSIyLjMiIGhlaWdodD0iNC41IiByeD0iMC42IiBmaWxsPSIjMGIxMTIwIi8+PHJlY3QgeD0iMTQiIHk9IjE5IiB3aWR0aD0iNCIgaGVpZ2h0PSIyLjQiIGZpbGw9IiMwYjExMjAiLz48cmVjdCB4PSI2IiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PHJlY3QgeD0iOSIgeT0iMjIuMiIgd2lkdGg9IjIiIGhlaWdodD0iMiIgZmlsbD0iI0U1QTMyRSIvPjxyZWN0IHg9IjEyIiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PHJlY3QgeD0iMTgiIHk9IjIyLjIiIHdpZHRoPSIyIiBoZWlnaHQ9IjIiIGZpbGw9IiNFNUEzMkUiLz48cmVjdCB4PSIyMSIgeT0iMjIuMiIgd2lkdGg9IjIiIGhlaWdodD0iMiIgZmlsbD0iI0U1QTMyRSIvPjxyZWN0IHg9IjI0IiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PC9zdmc+Cg==">
-  <link rel="stylesheet" href="style.css">
+  <meta property="og:title" content="nixram">
+  <meta property="og:description" content="Compressed memory, an out-of-memory watchdog and the kernel memory settings for NixOS — all from one declaration: how much RAM the machine has.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nixram.corbet.ch">
+  <meta property="og:image" content="https://nixram.corbet.ch/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="nixram wordmark above a compressed-memory block symbol on a dark background">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://nixram.corbet.ch/og-image.png">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
 <header class="hero">
   <nav>
-    <a href="#" class="nav-brand">nixram</a>
+    <a href="/" class="nav-brand">nixram</a>
     <div class="nav-links">
-      <a href="#levels">Levels</a>
-      <a href="#decisions">Decisions</a>
+      <a href="#zram-or-zswap" class="nav-anchor">zram or zswap</a>
+      <a href="/docs">Docs</a>
       <a href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub</a>
       <a href="#get-started" class="btn-nav">Get started</a>
     </div>
@@ -25,8 +36,8 @@
 
   <div class="hero-content">
     <h1>nixram</h1>
-    <p class="tagline">Declare a RAM level. Everything else follows.</p>
-    <p class="subtitle">One small NixOS module derives a coherent memory-pressure policy from a single declared RAM level — zram (or zswap) sizing, PSI-armed <code>systemd-oomd</code>, and the <code>vm.*</code> sysctl layer, all from one table. Every value it sets is tagged <strong>sourced</strong>, <strong>extrapolated</strong>, or <strong>kernel default</strong>, so nothing reads as more settled than it is.</p>
+    <p class="tagline">Tell it how much RAM you have. It does the rest.</p>
+    <p class="subtitle">A small NixOS module that sets up compressed memory &mdash; zram, or zswap if you prefer &mdash; plus an out-of-memory watchdog and the kernel's memory settings. The default keeps swap inside RAM itself: no disk, no file, no partition. <a href="#zram-or-zswap">Not sure which of the two you want? That question is answered below.</a></p>
     <div class="cta">
       <a href="#get-started" class="btn btn-primary">Get started</a>
       <a href="https://github.com/julian-corbet/nixram-corbet-ch" class="btn btn-secondary">View on GitHub</a>
@@ -36,434 +47,319 @@
   <div class="hero-demo">
     <div class="terminal">
       <div class="terminal-header">
-        <div class="terminal-dots"><span></span><span></span><span></span></div>
-        <span class="terminal-title">nixram — detect once, paste once</span>
+        <div class="terminal-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <span class="terminal-title">nixram &mdash; picking the RAM size bracket for a new machine</span>
       </div>
-      <pre class="terminal-body"><code><span class="prompt">$</span> <span class="cmd">nix run github:julian-corbet/nixram-corbet-ch#detect-level</span>
+      <pre class="terminal-body"><code><span class="prompt">$</span> nix run github:julian-corbet/nixram-corbet-ch#detect-level
 <span class="output">Detected: 3931 MiB total RAM (/proc/meminfo MemTotal)
 Nearest nixram level (rounded UP to the next anchor, never down): 4G
 
 This is a 'detect once, paste once' tool, not a live auto-detector:
 run it on the target machine, then paste the line below into your
-NixOS configuration and commit it like any other hardware fact.</span>
+NixOS configuration and commit it like any other hardware fact.
 
-    <span class="paste">services.nixram.level = "4G";</span>
+    services.nixram.level = "4G";</span>
 
-<span class="comment"># then wire the module into your flake + configuration:</span>
-<span class="comment"># flake.nix</span>
-inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";
-<span class="comment"># configuration.nix</span>
-imports = [ inputs.nixram.nixosModules.nixram ];
-services.nixram = {
-  enable = true;
-  level = "4G";
-};</code></pre>
+<span class="prompt">$</span> $EDITOR configuration.nix
+<span class="output">  imports = [ inputs.nixram.nixosModules.nixram ];
+
+  services.nixram = {
+    enable = true;
+    level = "4G";
+  };</span>
+
+<span class="prompt">$</span> nixos-rebuild switch</code></pre>
     </div>
   </div>
 </header>
 
 <main>
 
+<section class="problem">
+  <div class="container">
+    <h2>The problem</h2>
+    <div class="prose">
+      <p>A box under memory pressure gets slow long before it gets loud. Work stalls waiting for pages of memory to move, and the machine still looks fine on a dashboard. Then the kernel's last-resort response to running out of memory &mdash; picking a process and killing it &mdash; takes out something you needed.</p>
+      <p>The settings that prevent this are normally a dozen loosely related knobs, picked one at a time from a dozen blog posts, with nothing checking that your answers agree. <strong>nixram derives all of them from a single table, indexed by how much RAM the machine has.</strong></p>
+    </div>
+  </div>
+</section>
+
+<section id="zram-or-zswap" class="decision band">
+  <div class="container">
+    <h2>zram or zswap &mdash; which do I want?</h2>
+    <div class="prose">
+      <p>These are the two ways Linux compresses memory. Most write-ups explain what they are without telling you which one to pick, so here is the choice itself.</p>
+    </div>
+
+    <div class="decision-grid">
+      <div class="decision-card">
+        <h3>zram &mdash; compressed RAM used <em>as</em> a swap device</h3>
+        <p>A block of your own RAM is set up as a swap device. Cold pages &mdash; the fixed 4 KiB chunks the kernel moves memory around in &mdash; get squeezed and stay in memory, so you effectively fit more into the same RAM. <strong>No disk is involved anywhere in the zram path.</strong></p>
+        <span class="kicker">Choose it when</span>
+        <ul>
+          <li>You have a server or VPS with no usable swap disk</li>
+          <li>You do not want to touch the machine's disk layout</li>
+        </ul>
+        <p class="caveat"><strong>The catch.</strong> zram cannot be a hibernation target, because a hibernation image has to survive the power going off and zram lives in RAM. If you hibernate, that has to go to a real swap partition.</p>
+      </div>
+      <div class="decision-card">
+        <h3>zswap &mdash; a compressed cache in front of <em>real</em> disk swap</h3>
+        <p>Pages get compressed on their way out, and the coldest ones are written through to the disk in the background. Once the cache is full it stops accepting, and pages go straight to disk until it drains again. It needs a real swap device to sit in front of, and nixram will refuse to build without one.</p>
+        <span class="kicker">Choose it when</span>
+        <ul>
+          <li>You have a laptop or desktop with a swap partition already</li>
+          <li>You want that swap partition to be the only swap medium on the box</li>
+        </ul>
+        <p class="caveat"><strong>The catch.</strong> zswap takes effect on the <strong>next boot</strong>, not on rebuild. These are kernel command-line settings, so <code>nixos-rebuild switch</code> alone does not turn it on under the running kernel.</p>
+      </div>
+    </div>
+
+    <div class="rule">
+      <span class="kicker">The one-line rule</span>
+      <p>No swap disk, or you do not want to touch it &mdash; choose zram. A real swap partition you intend to keep, or that is also your hibernation target &mdash; choose zswap.</p>
+    </div>
+
+    <div class="note">
+      <p>zram is the default (<code>mode = "zram"</code>). The two are deliberately mutually exclusive: running both means compressing the same page twice, and nobody has published a measurement showing that helps. The setting accepts exactly three values, so the combination cannot be written by accident.</p>
+      <p>The third value is <code>mode = "none"</code>: skip the swap layer entirely and take only the out-of-memory watchdog and the kernel settings. That is the honest answer for a very large box running one big workload that does not swap usefully.</p>
+      <p>Choosing zram does not remove any swap partition you already have. It adds a zram device the kernel prefers, and falls through to your disk swap only once zram is exhausted.</p>
+    </div>
+  </div>
+</section>
+
 <section class="how-it-works">
   <div class="container">
     <h2>How it works</h2>
-    <p class="section-intro">No eval-time guessing. Nix evaluation is pure and static — it can't read a target machine's live memory — so the RAM level is a fact you detect once and commit, not something the build infers behind your back.</p>
     <div class="steps">
       <div class="step">
         <div class="step-num">1</div>
-        <h3>Detect once</h3>
-        <p>Run <code>detect-level</code> on the target machine. It reads <code>/proc/meminfo</code> and rounds <strong>up</strong> to the next of the fourteen anchors, never down, then prints a ready-to-paste line.</p>
+        <h3>Detect your level</h3>
+        <p>A "level" is just the RAM size bracket your machine falls into. Run <code>detect-level</code> on it: the tool reads the real RAM total, rounds <em>up</em> to the nearest of fourteen anchor sizes, and prints the line to paste.</p>
       </div>
       <div class="step">
         <div class="step-num">2</div>
-        <h3>Paste once</h3>
-        <p>Commit <code>services.nixram.level</code> like any other hardware fact. There is no default level and no eval-time auto-detection — leaving it unset is a hard error, by design.</p>
+        <h3>Declare it</h3>
+        <p>Add the flake input, import the module, set two options: <code>enable</code> and <code>level</code>. That is the whole configuration.</p>
       </div>
       <div class="step">
         <div class="step-num">3</div>
-        <h3>Everything derives</h3>
-        <p>The zram device and its sizing, <code>systemd-oomd</code>'s PSI arming, and the whole <code>vm.*</code> sysctl layer all resolve from one table — every value with an escape hatch if you disagree.</p>
+        <h3>Rebuild</h3>
+        <p>The compressed memory device, the out-of-memory watchdog, and the kernel memory settings all come up together, sized for that level.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section class="model">
+<section class="features">
   <div class="container">
-    <h2>The model</h2>
-    <p class="section-intro">nixram's central thesis in one picture: <code>disksize</code> is only a cheap virtual ceiling, and the real physical cost is bounded separately by <code>zram-resident-limit</code>. Budget the physical, and the virtual can afford to be generous.</p>
-
-    <div class="model-panel">
-      <svg class="model-diagram" viewBox="0 0 660 340" role="img" aria-labelledby="model-title model-desc">
-        <title id="model-title">nixram sizing model</title>
-        <desc id="model-desc">A machine RAM column. An amber solid line marks zram-resident-limit, the physical budget at about 35 percent of RAM, with compressed pages packed beneath it. A teal dashed line well above marks disksize, the virtual ceiling, which can reach up to twice RAM.</desc>
-
-        <!-- RAM column -->
-        <rect x="70" y="100" width="230" height="210" fill="rgba(255,255,255,0.025)" stroke="rgba(255,255,255,0.13)" stroke-width="1"/>
-
-        <!-- guides showing virtual space rising above physical RAM -->
-        <line x1="70" y1="100" x2="70" y2="55" stroke="rgba(62,197,180,0.35)" stroke-width="1" stroke-dasharray="3 4"/>
-        <line x1="300" y1="100" x2="300" y2="55" stroke="rgba(62,197,180,0.35)" stroke-width="1" stroke-dasharray="3 4"/>
-
-        <!-- compressed pages packed under the physical budget -->
-        <rect x="74" y="238" width="222" height="70" fill="rgba(229,163,46,0.16)" stroke="rgba(229,163,46,0.45)" stroke-width="1"/>
-        <line x1="74" y1="255.5" x2="296" y2="255.5" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
-        <line x1="74" y1="273" x2="296" y2="273" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
-        <line x1="74" y1="290.5" x2="296" y2="290.5" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
-        <text class="d-mono" x="185" y="279" text-anchor="middle" font-size="12" fill="#E5A32E">compressed pages</text>
-
-        <!-- physical RAM 100% marker -->
-        <line x1="55" y1="100" x2="430" y2="100" stroke="#5b6678" stroke-width="1" stroke-dasharray="2 4"/>
-        <text x="445" y="104" font-size="12" fill="#7c8494">physical RAM · 100%</text>
-
-        <!-- teal dashed: disksize / virtual ceiling -->
-        <line x1="55" y1="55" x2="430" y2="55" stroke="#3EC5B4" stroke-width="2.4" stroke-dasharray="9 5"/>
-        <text class="d-mono" x="445" y="52" font-size="14" fill="#3EC5B4">disksize</text>
-        <text x="445" y="69" font-size="11.5" fill="#8b93a3">virtual ceiling · up to 2× RAM</text>
-
-        <!-- amber solid: zram-resident-limit / physical budget -->
-        <line x1="55" y1="236" x2="430" y2="236" stroke="#E5A32E" stroke-width="2.6"/>
-        <text class="d-mono" x="445" y="233" font-size="14" fill="#E5A32E">zram-resident-limit</text>
-        <text x="445" y="250" font-size="11.5" fill="#8b93a3">physical budget · ~35% of RAM</text>
-
-        <!-- headroom arrow between physical budget and virtual ceiling -->
-        <line x1="332" y1="63" x2="332" y2="229" stroke="#6b7280" stroke-width="1.2"/>
-        <polygon points="332,57 328,66 336,66" fill="#6b7280"/>
-        <polygon points="332,235 328,226 336,226" fill="#6b7280"/>
-        <text x="347" y="146" font-size="11" fill="#8b93a3" text-anchor="middle" transform="rotate(-90 347 146)">compression headroom</text>
-
-        <!-- column caption -->
-        <text class="d-mono" x="185" y="330" text-anchor="middle" font-size="12" fill="#8b93a3">machine RAM</text>
-      </svg>
+    <h2>What you get</h2>
+    <div class="feature-grid">
+      <div class="feature">
+        <h3>One declaration instead of a dozen tunables</h3>
+        <p>Swap size, the real memory budget, swap priority, the reclaim settings &mdash; how eagerly the kernel takes memory back from one thing to give it to another &mdash; and the watchdog thresholds all come from the same row of the same table. You never hand-pick values that quietly contradict each other.</p>
+      </div>
+      <div class="feature">
+        <h3>A ladder from tiny VPS to big server</h3>
+        <p>Fourteen anchor sizes, from 256M to 128G. The shape genuinely changes along the way. The smallest tier spends less CPU on compression and accepts a worse ratio for it. The largest ones stop scaling the swap device with RAM and cap it instead.</p>
+      </div>
+      <div class="feature">
+        <h3>Two limits, and the tight one is real</h3>
+        <p>zram gets a generous ceiling on how much compressed data it may hold, plus a tight cap on how much actual RAM the compressed pool may occupy. The tight cap is what protects the box, so the generous ceiling costs nothing.</p>
+      </div>
+      <div class="feature">
+        <h3>Honest about what is measured</h3>
+        <p>Every value carries one of three marks: cited from someone else's published work, our own reasoned extrapolation that nobody has measured yet, or the kernel's own default left deliberately alone. The extrapolations are tracked as open experiments.</p>
+      </div>
+      <div class="feature">
+        <h3>A watchdog that watches the right thing</h3>
+        <p>nixram arms <code>systemd-oomd</code>, an out-of-memory watchdog that acts before the kernel's last-resort process killer does. It triggers on stall time &mdash; how long work actually sat blocked waiting on memory &mdash; not on a swap-used percentage.</p>
+      </div>
+      <div class="feature">
+        <h3>Why not a swap percentage</h3>
+        <p>A swap-used percentage would be measured against the generous ceiling, which is larger than the real budget on purpose. It would read "plenty of headroom" right up to the wall. So the two watchdog settings that fire on a swap-used percentage are not configured at all.</p>
+      </div>
+      <div class="feature">
+        <h3>No daemon of its own</h3>
+        <p>nixram is mostly configuration. It drives <code>zram-generator</code>, the upstream systemd tool that actually creates the device, plus systemd and the kernel's own settings. The one unit it ships is a oneshot that runs on a timer and exits. Nothing of nixram's sits in the memory path.</p>
+      </div>
+      <div class="feature">
+        <h3>Safe defaults, never silent ones</h3>
+        <p>Your SSH daemon is protected from being killed by two independent layers, one of which keeps working even when the watchdog is off. Enabling the module without a level is a hard build error with a message pointing at the fix, not a quiet fallback.</p>
+      </div>
+      <div class="feature">
+        <h3>A real module with a test suite</h3>
+        <p>A NixOS flake module for x86_64 and aarch64, with checks in the repo, MIT licensed. Nearly every computed value has an override, and the docs list the handful that are level data only.</p>
+      </div>
     </div>
+  </div>
+</section>
+
+<section class="explainer">
+  <div class="container">
+    <h2>Compression versus recompression</h2>
+    <div class="prose">
+      <p>zram can compress the same page twice, at two different moments, for two different reasons. Most people have never met the second one.</p>
+    </div>
+
+    <div class="explainer-grid">
+      <div class="explainer-card">
+        <span class="kicker">On the way in</span>
+        <h3>Compression is the toll booth</h3>
+        <p>A page is being reclaimed &mdash; the kernel is taking memory back from one thing to give it to another. zram compresses it right then using zstd, a fast general-purpose compression algorithm, in the kernel path, while the process that needed the memory waits.</p>
+        <p>It is on the critical path, under pressure. That is why the default is a fast setting.</p>
+      </div>
+      <div class="explainer-card">
+        <span class="kicker">Later, while nothing waits</span>
+        <h3>Recompression is the night shift</h3>
+        <p>Newer kernels let you name a second, slower setting. Later, on a schedule, the machine walks over pages nothing has touched: unpack them, repack them denser, keep whichever version came out smaller.</p>
+        <p>Nothing is waiting on it. The kernel never starts this by itself, so nixram ships a systemd timer that does, once a day by default.</p>
+      </div>
+    </div>
+
+    <div class="rule">
+      <span class="kicker">Why that is close to free</span>
+      <p>zstd decompression speed is essentially independent of how hard the data was packed. A page squeezed at a high setting reads back just as fast as one squeezed at a low setting. The extra cost is paid once, in the background, and the read path stays fast forever after.</p>
+    </div>
+
+    <div class="note">
+      <p>Swap traffic is asymmetric in exactly the way that makes this pay. Writes are urgent and reads are urgent, but the storage in between is long-lived, and most swapped pages are never read back at all.</p>
+      <p><strong>The honest caveat.</strong> Pages are only 4 KiB, too small for the long-range tricks that make big files shrink dramatically. So the extra saving is modest, and it is an open question rather than a result. The second, slower setting defaults to zstd compression strength 12.</p>
+      <p><strong>Requirements.</strong> Recompression needs Linux 6.2 or newer, built with zram's multi-tier compression support. On an older kernel the timer logs one explanatory line and exits cleanly. It does not fail your rebuild or your boot.</p>
+      <p>The line to leave with: compression happens on the way in and has to be fast. Recompression happens later while the box is idle and can afford to be slow, because unpacking costs the same either way.</p>
+    </div>
+  </div>
+</section>
+
+<section class="architecture band">
+  <div class="container">
+    <h2>Architecture</h2>
+    <div class="prose">
+      <p>One idea carries the whole design. zram is given two separate limits that do two different jobs.</p>
+    </div>
+
+    <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine at level 4G, the ceiling (the zram-size setting) is 4 GiB and bounds how much compressed data the device may hold. The budget (the zram-resident-limit setting) is 35 percent of RAM, or 1.4 GiB, and bounds how much real RAM the compressed pool may occupy. Whichever limit is reached first is the one that stops you."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
+
+  ┌───────────────────────────────────────────────────────────┐
+  │  CEILING     zram-size = ram                    4 GiB     │
+  │                                                           │
+  │  How much compressed data the device may hold.            │
+  │  A number only. No disk, no file, no partition.           │
+  └───────────────────────────────────────────────────────────┘
+                        │
+                        │  all of it actually living in
+                        ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │  BUDGET      zram-resident-limit = 35% of RAM   1.4 GiB   │
+  │                                                           │
+  │  How much real RAM the compressed pool may occupy.        │
+  │  Enforced by the kernel. This is the real protection.     │
+  └───────────────────────────────────────────────────────────┘
+
+  Whichever limit is reached first is the one that stops you.</code></pre>
 
     <div class="arch-details">
       <div class="arch-detail">
-        <h3>Virtual ceiling</h3>
-        <p><code>disksize</code> is cheap address space — deliberately generous where it counts: up to 2× RAM on the smallest tiers and full-RAM through the middle, before the <code>/2</code> taper and 16 GiB cap bring it back inside upstream's 0.1–0.5 guidance on the largest boxes. Once a resident limit is doing the real safety job, a bigger virtual ceiling costs nothing but lets compression stretch the same physical spend further before hitting a wall.</p>
+        <h3>The ceiling is just a number</h3>
+        <p>Nothing is allocated because of it and no storage is reserved. The option is literally called <code>zram-size</code>, and the kernel's own name for the attribute underneath, <code>disksize</code>, is worse &mdash; there is still no disk anywhere in this path.</p>
       </div>
       <div class="arch-detail">
-        <h3>Physical budget</h3>
-        <p><code>zram-resident-limit</code> caps the real physical spend inside a conservative fraction of RAM at every tier up to 32G — half of RAM on the smallest boxes, tapering to 35% once there is slack to share. From 64G up it is deliberately unset, because <code>disksize</code> itself already caps physical spend at ≤25% of RAM.</p>
+        <h3>The budget is what protects you</h3>
+        <p><code>zram-resident-limit</code> caps how much real RAM the compressed pool may ever occupy. Because it does the safety work, the ceiling above it can afford to be generous.</p>
       </div>
       <div class="arch-detail">
-        <h3>PSI, not percentages</h3>
-        <p><code>systemd-oomd</code> is armed on pressure-stall time, which is medium-agnostic. A swap-used percentage measured against the inflated <code>disksize</code> denominator is the wrong number, so <code>SwapUsedLimit</code> is not configured at all — not as a decorative backstop, not anywhere.</p>
+        <h3>Both outcomes are bounded</h3>
+        <p>Pages that compress well hit the ceiling. Pages that compress badly hit the budget. Either way the device fills and stops, rather than growing until the thing meant to relieve memory pressure becomes the cause of it.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="levels" class="levels">
+<section class="levels">
   <div class="container">
-    <h2>The levels</h2>
-    <p class="section-intro">Fourteen RAM-size anchors, 256M through 128G, each a complete and coherent set of values. <code>ram</code> is zram-generator's own variable for total detected RAM in MiB — the formulas are evaluated against real <code>/proc/meminfo</code> at boot, so the <em>formula</em> is what's tiered, not a number baked in per level.</p>
-
-    <div class="legend">
-      <span><span class="badge badge-sourced" aria-hidden="true"></span> sourced — an upstream distro or kernel-doc default, applied as-is</span>
-      <span><span class="badge badge-extrapolated" aria-hidden="true"></span> extrapolated — nixram's own curve; reasoned, not measured</span>
-      <span><span class="badge badge-default" aria-hidden="true"></span> kernel default — deliberately left untouched</span>
+    <h2>Find your box on the ladder</h2>
+    <div class="prose">
+      <p>Fourteen anchor sizes. The detector rounds up, never down. That is safe because nothing is a fixed number &mdash; every value is worked out from the machine's real RAM at boot. A 20 GiB machine on the 24G level still sizes itself from 20 GiB.</p>
     </div>
 
+    <ul class="level-chips" aria-label="The fourteen nixram RAM levels">
+      <li>256M</li><li>512M</li><li>1G</li><li>2G</li><li>4G</li><li>6G</li><li>8G</li>
+      <li>10G</li><li>12G</li><li>16G</li><li>24G</li><li>32G</li><li>64G</li><li>128G</li>
+    </ul>
+
     <div class="table-scroll">
-      <table class="levels-table">
+      <table class="level-table">
         <thead>
           <tr>
-            <th>Level</th>
-            <th>zram-size</th>
-            <th>zram-resident-limit</th>
-            <th>compression</th>
-            <th>recompression tier</th>
-            <th>watermark_scale_factor</th>
-            <th>oomd</th>
+            <th scope="col">Levels</th>
+            <th scope="col">Compressed data ceiling</th>
+            <th scope="col">Real RAM the pool may occupy</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><span class="lvl">256M</span></td>
-            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd(level=1)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">off</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">off</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <th scope="row">256M &ndash; 1G</th>
+            <td>twice RAM</td>
+            <td>half of RAM</td>
           </tr>
           <tr>
-            <td><span class="lvl">512M</span></td>
-            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <th scope="row">2G &ndash; 8G</th>
+            <td>all of RAM</td>
+            <td>35% of RAM</td>
           </tr>
           <tr>
-            <td><span class="lvl">1G</span></td>
-            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <th scope="row">10G &ndash; 32G</th>
+            <td>half of RAM, capped at 16 GiB</td>
+            <td>35% of RAM</td>
           </tr>
           <tr>
-            <td><span class="lvl">2G</span></td>
-            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">4G</span></td>
-            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">6G</span></td>
-            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">8G</span></td>
-            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">10G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">12G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">16G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">24G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">32G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">64G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">unset (null)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-          </tr>
-          <tr>
-            <td><span class="lvl">128G</span></td>
-            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">unset (null)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
-            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
-            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <th scope="row">64G &ndash; 128G</th>
+            <td>16 GiB flat</td>
+            <td>deliberately unset &mdash; at those sizes the ceiling alone is already 25% of RAM or less</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="table-note"><sup class="fn">1</sup> The <span class="mono">/2</span> taper is extrapolated <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span>; the 16384 MiB (16 GiB) cap it approaches is sourced <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span> (Pop!_OS). At 32G the two meet exactly (32 / 2 = 16). <code>oomd</code> here is <code>oomd.enable</code>; when on, its PSI thresholds are the shared constants below, not per-level values.</p>
 
-    <p class="cards-lead">Level by level — why each tier is shaped the way it is</p>
-    <div class="level-cards">
-      <div class="level-card">
-        <h3><span class="lvl">256M</span> — the survival tier</h3>
-        <p>Everything here is rationed twice over: RAM, and the CPU to compress it. <code>disksize</code> is <code>ram * 2</code> because compression is the only headroom this box will ever have, and the resident limit at half of RAM caps how much of that reach can become physical spend. <code>zstd(level=1)</code> rather than plain <code>zstd</code>: every page fault costs CPU on a machine that has almost none to spare. <code>systemd-oomd</code> stays off — its own RSS is an unmeasured fraction of a very small total — so the kernel OOM killer plus the <code>OOMScoreAdjust = -900</code> protection layer stands guard alone. Recompression off: a pool that tops out around ~512M logical can't repay a second pass.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">512M</span> — first full-strength tier</h3>
-        <p>The same 2× / ½ shape as 256M, but nothing needs rationing twice anymore: plain <code>zstd</code> is affordable, oomd is armed (its RSS is a far smaller fraction of the box), and the daily idle-recompression pass starts paying — tens of MB back, on a machine where tens of MB are percent-of-RAM money.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">1G</span> — the small-box shape holds</h3>
-        <p>The last tier of the small-box shape: double-RAM virtual reach, half-of-RAM physical budget. From here down the box lives or dies by compression stretch. <code>watermark_scale_factor</code> stays at 200 across all three small tiers: any fixed percentage of a tiny zone is a tiny absolute number of free pages, so kswapd must start reclaiming earlier to leave real headroom.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">2G</span> — the sourced middle begins</h3>
-        <p><code>disksize</code> drops to plain <code>ram</code> — Fedora's own shipped default (full-RAM scaling), the best-sourced point on the entire curve. The physical budget tapers from ½ to 35%: with multiple GB present, the compressed pool no longer needs to be allowed half the machine to be useful. Watermarks relax to 150.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">4G</span> — the reference tier</h3>
-        <p>The most ordinary row in the table — <code>disksize</code> sourced from Fedora, the standard 35% budget, every shared constant at its normal value. To understand nixram's model, read this row first: every other tier is this row with one scarcity turned up or down.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">6G</span> / <span class="lvl">8G</span> — same row, more slack</h3>
-        <p>Nothing changes but the numbers the same expressions resolve to. 8G is the last tier where a full-RAM <code>disksize</code> is still the right ceiling — it's also exactly where Fedora's own default stops scaling (<code>min(ram, 8192)</code>). Past 8 GiB, a swap absorber sized to the whole machine is more than a box that large can usefully drain before a timely OOM decision beats stretching compression any further, so at 10G the ceiling hands over to the bounded <code>/2</code> taper.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">10G</span> — the taper begins</h3>
-        <p><code>disksize</code> switches to <code>min(ram / 2, 16384)</code>. The need for swap capacity stops scaling with RAM: a 10G box under pressure doesn't want 10G of swap, it wants a bounded absorber and then a timely OOM decision. The <code>/2</code> taper is what binds through 32G (5G of reach here); the 16 GiB cap in the formula is Pop!_OS's shipped ceiling, waiting to take over. Watermarks reach the Pop-validated 125.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">12G</span> / <span class="lvl">16G</span> / <span class="lvl">24G</span> — the plateau</h3>
-        <p>The <code>/2</code> taper walks the ratio down: 6G of reach on a 12G box, 8G on 16G, 12G on 24G. The shrinking fraction is the point, not a side effect — what absorbs a bounded working-set overflow is an absolute number of GiB of cold-page parking, not a fixed percentage of a machine that keeps growing. Once the absorber is big enough to hold the cold set, more capacity only delays the OOM decision a larger box should be making sooner, so the reach is deliberately let fall as a share of RAM while staying inside the same 35% physical budget.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">32G</span> — where taper meets cap</h3>
-        <p>32 / 2 = 16: the one tier where the taper and the 16 GiB cap agree exactly. Above this line the cap alone rules and RAM size stops mattering to the absorber entirely.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">64G</span> — the budget retires</h3>
-        <p>The resident limit is deliberately unset. <code>disksize</code> (16G) is already ≤25% of RAM — a physical bound tighter than the 35% rule would produce — so a second cap would be decoration, not protection. Flagged as an open question rather than proven. Watermarks ease to 100: kswapd can afford to be lazy here. For a box running one huge, non-swap-shaped workload, the honest alternative is <code>mode = "none"</code> — oomd and sysctls without any swap medium.</p>
-      </div>
-      <div class="level-card">
-        <h3><span class="lvl">128G</span> — the cap is the whole story</h3>
-        <p>16G of absorber on a machine with eight times that much RAM. zram at this scale is not survival — it's a parking lot for cold pages that would otherwise squat on hot RAM for months of uptime. Everything else as 64G.</p>
-      </div>
-    </div>
-
-    <div class="strip-grid">
-      <div class="strip">
-        <h3>Constants shared by every level</h3>
-        <p>Properties of the swap medium (zram) or the reclaim/OOM machinery — not the box — so they don't vary by RAM size.</p>
-        <div class="kv-scroll">
-        <table class="kv">
-          <tbody>
-            <tr><td>vm.swappiness</td><td>180</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>vm.page-cluster</td><td>0</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>vm.watermark_boost_factor</td><td>0</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>vm.min_free_kbytes</td><td>untouched</td><td><span class="badge badge-default" title="kernel default" aria-label="kernel default"></span></td></tr>
-            <tr><td>MGLRU min_ttl_ms</td><td>1000 <span class="note">flagged</span></td><td><span class="badge badge-sourced" title="sourced, flagged" aria-label="sourced, flagged"></span></td></tr>
-            <tr><td>PSI threshold</td><td>60% / 30s</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>zram swap-priority</td><td>100</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-          </tbody>
-        </table>
-        </div>
-      </div>
-      <div class="strip">
-        <h3>Zswap profile <span class="mono" style="color:var(--text-dim);font-weight:400;font-size:0.8rem;">(mode = "zswap")</span></h3>
-        <p>A separate, flat profile for laptops and desktops with real disk-backed swap — a compressed cache in front of the swap device, not a device itself.</p>
-        <div class="kv-scroll">
-        <table class="kv">
-          <tbody>
-            <tr><td>zswap.max_pool_percent</td><td>20</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>zswap.accept_threshold_percent</td><td>90</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>zswap.shrinker_enabled</td><td>on <span class="note">upstream off</span></td><td><span class="badge badge-extrapolated" title="extrapolated — upstream default is off" aria-label="extrapolated — upstream default is off"></span></td></tr>
-            <tr><td>zswap.zpool</td><td>zsmalloc</td><td><span class="badge badge-sourced" title="sourced — only option left" aria-label="sourced — only option left"></span></td></tr>
-            <tr><td>vm.swappiness</td><td>120</td><td><span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td></tr>
-            <tr><td>vm.page-cluster</td><td>2 SSD <span class="note">/ 3 HDD</span></td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-            <tr><td>vm.watermark_scale_factor</td><td>125 <span class="note">flat</span></td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
-          </tbody>
-        </table>
-        </div>
-      </div>
+    <div class="note">
+      <p><strong>One documented exception to rounding up.</strong> Any machine above 32 GiB and up to 64 GiB rounds into the 64G level, which drops the real cap. A 33 GiB machine there gets a 16 GiB ceiling and no budget behind it. If you want the 35% budget kept, set it explicitly.</p>
+      <p>Each tier also carries its own compression setting, reclaim tuning and watchdog state. <a href="/docs">The full table, and the reasoning for every tier, is in the docs</a>.</p>
     </div>
   </div>
 </section>
 
-<section id="decisions" class="decisions">
-  <div class="container">
-    <h2>Decisions</h2>
-    <p class="section-intro">The deliberate calls — the places nixram departs from a default on purpose, and says so out loud. Each links to the numbered reasoning behind it.</p>
-    <div class="feature-grid">
-      <a class="feature feature--amber" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#1-zram-disksize-curve">
-        <span class="flag flag--amber">deliberate departure</span>
-        <h3>Exceeds upstream guidance — deliberately</h3>
-        <p>zram-generator recommends a <code>disksize</code> fraction of 0.1–0.5 of RAM. The small and mid tiers exceed it — up to 2× RAM below 2G, full-RAM at 2G–8G — while the 10G+ <code>/2</code> taper and 16 GiB cap bring <code>disksize</code> back to ≤0.5× RAM (0.25× at 64G, 0.125× at 128G). Exceeding it where it does isn't an oversight: <code>disksize</code> is only the virtual ceiling, and <code>zram-resident-limit</code> does the real physical-safety job, so a generous ceiling just gives compression room to stretch.</p>
-        <span class="more">Read rationale [1] →</span>
-      </a>
-      <a class="feature feature--red" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere">
-        <span class="flag flag--red">dropped by decision</span>
-        <h3>SwapUsedLimit: not configured anywhere</h3>
-        <p>A swap-used percentage is measured against <code>disksize</code> — which nixram deliberately inflates past the real budget. It would read "plenty of headroom" right up until the resident-limit wall is hit. Not a decorative backstop, not an oversight — it is not configured at all.</p>
-        <span class="more">Read the FAQ →</span>
-      </a>
-      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#10-psi-thresholds-60--30s">
-        <h3>PSI-only OOM detection</h3>
-        <p><code>systemd-oomd</code> is armed on memory-pressure stall time — 60% over 30s, systemd's own upstream defaults — and nothing else. Stall time is medium-agnostic: it doesn't care whether swap is zram, zswap, or a disk partition, or how large its nominal capacity looks.</p>
-        <span class="more">Read rationale [10] →</span>
-      </a>
-      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-does-level-have-no-default-and-no-eval-time-auto-detection">
-        <h3>Detect once, paste once</h3>
-        <p>Nix evaluation is pure and static — it can't read a machine's live <code>/proc/meminfo</code>. A silent eval-time guess would trade a wrong policy for the appearance of convenience, so <code>level</code> has no default and leaving it unset is a hard error. You run the detector once and commit the line.</p>
-        <span class="more">Read the FAQ →</span>
-      </a>
-      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#11-idle-recompression">
-        <h3>Idle recompression, two-phase</h3>
-        <p>The kernel never recompresses on its own; userspace drives it. A rolling timer marks the resident set idle on one firing and recompresses what stayed untouched on the next, so "idle" reflects a real dwell period. The dense <code>zstd(level=12)</code> idle tier is free at read time — zstd's decompression speed is essentially level-independent.</p>
-        <span class="more">Read rationale [11] →</span>
-      </a>
-      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">
-        <h3>An honesty taxonomy</h3>
-        <p>Every value carries a tag: <span class="badge badge-sourced" aria-hidden="true"></span> sourced, <span class="badge badge-extrapolated" aria-hidden="true"></span> extrapolated, or <span class="badge badge-default" aria-hidden="true"></span> kernel default. Extrapolated values are reasoned, not measured — open experiments, not settled facts — and results feed back into the table as tag upgrades over time.</p>
-        <span class="more">Read the rationale →</span>
-      </a>
-    </div>
-  </div>
-</section>
-
-<section id="get-started" class="get-started">
+<section id="get-started" class="install">
   <div class="container">
     <h2>Get started</h2>
-    <p class="section-intro">Two moves: find your level on the target machine, then wire the module into your flake.</p>
     <div class="install-grid">
       <div class="install-method">
-        <h3>Add the flake</h3>
-        <p>Point an input at the flake, import the module, and enable it at your level.</p>
-        <pre><code><span class="comment"># flake.nix</span>
-inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";
+        <h3>1. Find your level</h3>
+        <p>Run this on the machine you are configuring. It reads the real RAM total and prints a line you can paste.</p>
+        <pre><code>nix run github:julian-corbet/nixram-corbet-ch#detect-level</code></pre>
+        <p>There is no build-time detection and no default level. Nix builds cannot read the target machine's live memory, so this is a manual step you commit &mdash; like writing down a disk UUID. Detect once, paste once.</p>
+      </div>
+      <div class="install-method">
+        <h3>2. Add the flake input</h3>
+        <pre><code>inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";</code></pre>
+      </div>
+      <div class="install-method">
+        <h3>3. Import and declare</h3>
+        <pre><code>imports = [ inputs.nixram.nixosModules.nixram ];
 
-<span class="comment"># in your nixosSystem modules:</span>
-imports = [ inputs.nixram.nixosModules.nixram ];
 services.nixram = {
   enable = true;
   level = "4G";
 };</code></pre>
+        <p>That is the whole configuration. Add <code>mode = "zswap";</code> if you have a real swap partition you want to keep, or you hibernate. Most other values have an override. The docs list the handful that are level data only.</p>
       </div>
       <div class="install-method">
-        <h3>Find your level</h3>
-        <p>Run this on the target machine — it prints the exact line to paste above.</p>
-        <pre><code>nix run \
-  github:julian-corbet/nixram-corbet-ch#detect-level</code></pre>
+        <h3>Then read the docs</h3>
+        <p>Per-tier reasoning, the full option surface, where each value comes from, and what is still unmeasured.</p>
+        <a href="/docs" class="btn btn-primary">Read the docs</a>
       </div>
     </div>
-    <p class="honesty-note"><strong>No default level, no auto-detection — by design.</strong> Run the detector on the target machine once, then commit the line it prints like any other hardware fact. A build can't read a machine's live memory, and a silent guess would be a footgun, not a convenience.</p>
   </div>
 </section>
 
@@ -472,13 +368,18 @@ services.nixram = {
 <footer>
   <div class="container">
     <div class="footer-links">
-      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/LICENSE">MIT</a>
-      <a href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub</a>
+      <a href="/docs">Docs</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch">Source</a>
       <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">Rationale</a>
       <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md">FAQ</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/tree/main/experiments">Experiments</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/issues">Issues</a>
     </div>
-    <p>MIT · <a href="https://github.com/julian-corbet/nixram-corbet-ch">github.com/julian-corbet/nixram-corbet-ch</a></p>
-    <p class="footer-note">Values marked extrapolated <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span> are reasoned, not measured — <code>experiments/</code> tracks what still needs measuring.</p>
+    <p>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/LICENSE">MIT</a> &middot;
+      <a href="https://github.com/julian-corbet">Julian Corbet</a> &middot;
+      Built on <a href="https://github.com/systemd/zram-generator">zram-generator</a>
+    </p>
   </div>
 </footer>
 

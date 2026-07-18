@@ -5,6 +5,10 @@ compatibility_date = "2026-05-09"
 # Worker (same shape as the sibling project sites). Content lives in ./site.
 [assets]
 directory = "./site"
+# Pinned rather than left to the platform default: the pages link to "/docs",
+# which only resolves to docs.html under this mode. If the default ever changes
+# those links 404.
+html_handling = "auto-trailing-slash"
 
 [[routes]]
 pattern = "nixram.corbet.ch"

@@ -64,9 +64,12 @@ is to keep the actual physical spend inside a conservative fraction of total
 RAM at every tier — `ram / 2` on the smallest tiers, where headroom is scarce
 and every MiB has to be accounted for, tapering to 35% on multi-GB tiers,
 where there's more slack to share between application memory and the
-compressed pool. At 64G and above it is deliberately unset: by that point the
+compressed pool. At 64G and above it is deliberately unset: at those anchor sizes the
 disksize formula ([1]) already caps the virtual ceiling at ≤25% of RAM on its
-own, and an additional physical cap was judged redundant. This is flagged as
+own, and an additional physical cap was judged redundant. Note that this
+holds AT the anchors — a machine that rounded up into the tier sees a larger
+fraction (a 33 GiB box gets a 16 GiB ceiling, ~48% of its RAM, with no
+physical cap behind it), which is the rounding caveat in `faq.md`. This is flagged as
 an open question, not a settled position — see `experiments/README.md`.
 
 **Source:** zram-generator's own upstream docs (the `zram-resident-limit` /

@@ -124,9 +124,10 @@ an imagined 24 GiB.
 
 The one place rounding has a real, honest consequence: rounding *into* the
 64G tier drops the resident limit entirely (it's unset from 64G up, see
-[rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model)). If
-you sit just above 32G — say, 33–40 GiB — and specifically want the 35%
-resident-limit budget kept rather than dropped, override it explicitly with
+[rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model)). Any
+machine above 32 GiB and up to 64 GiB rounds into that tier. If you sit
+anywhere in that range and specifically want the 35% resident-limit budget
+kept rather than dropped, override it explicitly with
 `zram.residentLimitOverride` rather than relying on the rounded-up level's
 default.
 

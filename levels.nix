@@ -70,11 +70,11 @@
         recompressionTimerEnableByDefault = false;
         # extrapolated, deliberate -- the whole compressed pool tops out
         # around ~512M here; a denser idle pass doesn't pay for itself.
-        # rationale.md [9].
+        # rationale.md [11].
         priority = 100;
-        # sourced -- Fedora's own zram default ships a higher-than-
-        # normal swap priority so zram always wins over disk swap when
-        # both exist. rationale.md [12] / faq.md.
+        # sourced -- zram-generator's own upstream default ships a
+        # higher-than-normal swap priority so zram always wins over disk
+        # swap when both exist. rationale.md [12] / faq.md.
       };
 
       watermarkScaleFactor = 200;   # extrapolated -- rationale.md [5]
