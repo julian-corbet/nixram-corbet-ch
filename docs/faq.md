@@ -34,9 +34,10 @@ one-time manual step, same as writing down a disk's UUID.
 ## What's the 0.1–0.5 disksize conflict, and why does nixram ignore it?
 
 zram-generator's own upstream documentation recommends sizing zram's
-disksize to a fraction "in the range 0.1–0.5" of total RAM. Every disksize
-expression nixram ships exceeds that range — up to 2x RAM on the smallest
-tiers ([rationale.md \[1\]](rationale.md#1-zram-disksize-curve)).
+disksize to a fraction "in the range 0.1–0.5" of total RAM. The small and mid
+tiers exceed that range — up to 2x RAM on the smallest ones — while the 10G+
+taper and 16 GiB cap bring disksize back inside it (≤25% of RAM by 64G)
+([rationale.md \[1\]](rationale.md#1-zram-disksize-curve)).
 
 The short version: that guidance is written for setups where disksize is the
 *only* ceiling. nixram's default (`zram.sizing = "both"`) always pairs

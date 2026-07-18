@@ -1,409 +1,172 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>nixram — level-anchored memory tuning for NixOS</title>
-<meta name="description" content="nixram is a NixOS flake module: declare a RAM level, get coherent zram/zswap sizing, PSI-armed systemd-oomd, and vm.* sysctl tuning derived from it — every value tagged sourced, extrapolated, or kernel default.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='6' width='20' height='12' rx='2' fill='%230C1116' stroke='%23E5A32E' stroke-width='1.6'/%3E%3Cline x1='2' y1='12' x2='22' y2='12' stroke='%233EC5B4' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3Crect x='5' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='9' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='13' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3Crect x='17' y='6' width='2' height='4' fill='%23E5A32E'/%3E%3C/svg%3E">
-<style>
-  :root {
-    --amber: #E5A32E;
-    --teal: #3EC5B4;
-    --red: #E5484D;
-    --bg: #F7F9FB;
-    --bg-alt: #EDF1F4;
-    --fg: #1A2129;
-    --fg-dim: #4A5560;
-    --border: rgba(26, 33, 41, 0.14);
-    --code-bg: rgba(26, 33, 41, 0.06);
-    --mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'JetBrains Mono', monospace;
-    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0C1116;
-      --bg-alt: #121922;
-      --fg: #E6EDF3;
-      --fg-dim: #93A1AC;
-      --border: rgba(230, 237, 243, 0.14);
-      --code-bg: rgba(230, 237, 243, 0.07);
-    }
-  }
-
-  * { box-sizing: border-box; }
-  html { color-scheme: light dark; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--sans);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-  }
-  .wrap {
-    max-width: 72rem;
-    margin: 0 auto;
-    padding: 0 1.5rem;
-  }
-  h1, h2, h3 { font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em; }
-  code, pre, .mono { font-family: var(--mono); }
-  a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 0.15em; }
-  a:hover { color: var(--amber); }
-
-  code:not(pre code) {
-    background: var(--code-bg);
-    border-radius: 0.25em;
-    padding: 0.1em 0.4em;
-    font-size: 0.92em;
-  }
-
-  .rule {
-    border: none;
-    height: 1px;
-    background: var(--amber);
-    opacity: 0.55;
-    margin: 4rem 0;
-  }
-
-  /* ---------- Hero ---------- */
-  .hero {
-    padding: 5.5rem 0 3.5rem;
-    text-align: center;
-  }
-  .kicker {
-    font-family: var(--mono);
-    font-size: 0.9rem;
-    color: var(--fg-dim);
-    letter-spacing: 0.02em;
-    margin: 0 0 1.25rem;
-  }
-  .kicker em { color: var(--amber); font-style: normal; }
-  h1.title {
-    font-size: clamp(3rem, 12vw, 6rem);
-    margin: 0;
-    line-height: 1;
-    background: linear-gradient(100deg, var(--amber), var(--teal));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  .tagline {
-    max-width: 42rem;
-    margin: 1.75rem auto 0;
-    font-size: 1.15rem;
-    color: var(--fg-dim);
-  }
-  .get-it {
-    margin-top: 2.5rem;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.9rem;
-    justify-content: center;
-    align-items: center;
-  }
-  .get-it a.button {
-    display: inline-block;
-    font-family: var(--mono);
-    font-size: 0.9rem;
-    color: var(--fg);
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    border-radius: 0.4em;
-    padding: 0.6em 1.1em;
-    text-decoration: none;
-  }
-  .get-it a.button:hover { border-color: var(--amber); color: var(--amber); }
-  .get-it code {
-    font-size: 0.85rem;
-    padding: 0.6em 0.9em;
-  }
-
-  /* ---------- Sections ---------- */
-  section { padding: 1rem 0; }
-  h2.section-title {
-    font-size: 1.5rem;
-    margin: 0 0 1.25rem;
-  }
-  h2.section-title .num {
-    color: var(--amber);
-    margin-right: 0.5rem;
-  }
-  .lede {
-    max-width: 48rem;
-    font-size: 1.05rem;
-  }
-
-  /* ---------- Instrument ---------- */
-  .instrument-frame {
-    border: 1px solid var(--border);
-    border-radius: 0.6rem;
-    background: var(--bg-alt);
-    padding: 0.75rem;
-  }
-  canvas#instrument-canvas {
-    display: block;
-    width: 100%;
-    height: 340px;
-    border-radius: 0.4rem;
-  }
-  .instrument-caption {
-    margin-top: 1rem;
-    font-size: 0.92rem;
-    color: var(--fg-dim);
-  }
-  .sr-only {
-    position: absolute;
-    width: 1px; height: 1px;
-    padding: 0; margin: -1px;
-    overflow: hidden;
-    clip: rect(0,0,0,0);
-    white-space: nowrap;
-    border: 0;
-  }
-
-  /* ---------- Table ---------- */
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
-    font-family: var(--mono);
-    font-size: 0.88rem;
-    color: var(--fg-dim);
-    margin-bottom: 1rem;
-  }
-  .legend b { color: var(--fg); }
-  .table-scroll {
-    overflow-x: auto;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-  }
-  table {
-    border-collapse: collapse;
-    width: 100%;
-    min-width: 62rem;
-    font-size: 0.9rem;
-  }
-  thead th {
-    text-align: left;
-    font-family: var(--mono);
-    font-weight: 600;
-    padding: 0.75em 1em;
-    background: var(--bg-alt);
-    border-bottom: 1px solid var(--border);
-    white-space: nowrap;
-    position: sticky;
-    top: 0;
-  }
-  tbody td {
-    padding: 0.7em 1em;
-    border-bottom: 1px solid var(--border);
-    font-family: var(--mono);
-    white-space: nowrap;
-  }
-  tbody tr:last-child td { border-bottom: none; }
-  tbody td:first-child { font-weight: 600; }
-  tbody tr:hover { background: var(--code-bg); }
-  .badge { opacity: 0.9; }
-  .b-sourced { color: var(--teal); }
-  .b-extrapolated { color: var(--amber); }
-  .b-default { color: var(--fg-dim); }
-  .footnote {
-    font-size: 0.85rem;
-    color: var(--fg-dim);
-    margin-top: 0.75rem;
-  }
-
-  .const-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-    gap: 0.75rem;
-    margin-top: 1rem;
-  }
-  .const-card {
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    padding: 0.9rem 1rem;
-    background: var(--bg-alt);
-  }
-  .const-card .k {
-    font-family: var(--mono);
-    font-size: 0.85rem;
-    color: var(--fg-dim);
-    display: block;
-  }
-  .const-card .v {
-    font-family: var(--mono);
-    font-size: 1.05rem;
-    margin-top: 0.2rem;
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-  }
-  h3.subhead {
-    font-size: 1.05rem;
-    margin: 2.5rem 0 0.25rem;
-  }
-  .subhead-note {
-    color: var(--fg-dim);
-    font-size: 0.9rem;
-    margin: 0 0 0.5rem;
-  }
-
-  /* ---------- Decision cards ---------- */
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-    gap: 1rem;
-    margin-top: 1.5rem;
-  }
-  .card {
-    border: 1px solid var(--border);
-    border-radius: 0.6rem;
-    padding: 1.25rem;
-    background: var(--bg-alt);
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-  .card.flag-amber { border-color: var(--amber); box-shadow: inset 3px 0 0 var(--amber); }
-  .card.flag-red { border-color: var(--red); box-shadow: inset 3px 0 0 var(--red); }
-  .card .flag-label {
-    font-family: var(--mono);
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
-  }
-  .card.flag-amber .flag-label { color: var(--amber); }
-  .card.flag-red .flag-label { color: var(--red); }
-  .card h4 {
-    margin: 0;
-    font-family: var(--mono);
-    font-size: 1rem;
-  }
-  .card p { margin: 0; font-size: 0.92rem; color: var(--fg-dim); }
-  .card .honesty { font-size: 0.8rem; font-family: var(--mono); }
-  .card a.doclink { font-size: 0.85rem; }
-
-  /* ---------- Quickstart ---------- */
-  pre.snippet {
-    background: var(--bg-alt);
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    padding: 1.25rem 1.5rem;
-    overflow-x: auto;
-    font-size: 0.9rem;
-    line-height: 1.65;
-  }
-  .tok-key { color: var(--teal); }
-  .tok-str { color: var(--amber); }
-  .tok-com { color: var(--fg-dim); font-style: italic; }
-  .tok-punc { color: var(--fg-dim); }
-
-  /* ---------- Footer ---------- */
-  footer {
-    padding: 3rem 0 4rem;
-    color: var(--fg-dim);
-    font-size: 0.9rem;
-  }
-  footer .wrap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem 1.5rem;
-    justify-content: space-between;
-    align-items: baseline;
-  }
-
-  @media (max-width: 480px) {
-    .hero { padding: 3.5rem 0 2rem; }
-    h2.section-title { font-size: 1.3rem; }
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nixram — level-anchored memory tuning for NixOS</title>
+  <meta name="description" content="One NixOS module: declare a RAM level, get coherent zram/zswap sizing, PSI-armed systemd-oomd, and vm.* sysctls derived from a single table — every value tagged sourced, extrapolated, or kernel default.">
+  <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiByeD0iNiIgZmlsbD0iIzBiMTEyMCIvPjxyZWN0IHg9IjUiIHk9IjkiIHdpZHRoPSIyMiIgaGVpZ2h0PSIxMiIgcng9IjEiIGZpbGw9IiNFNUEzMkUiLz48cmVjdCB4PSI3LjUiIHk9IjExLjUiIHdpZHRoPSIzLjIiIGhlaWdodD0iNC41IiByeD0iMC42IiBmaWxsPSIjMGIxMTIwIi8+PHJlY3QgeD0iMTIuNCIgeT0iMTEuNSIgd2lkdGg9IjMuMiIgaGVpZ2h0PSI0LjUiIHJ4PSIwLjYiIGZpbGw9IiMwYjExMjAiLz48cmVjdCB4PSIxNy4zIiB5PSIxMS41IiB3aWR0aD0iMy4yIiBoZWlnaHQ9IjQuNSIgcng9IjAuNiIgZmlsbD0iIzBiMTEyMCIvPjxyZWN0IHg9IjIyLjIiIHk9IjExLjUiIHdpZHRoPSIyLjMiIGhlaWdodD0iNC41IiByeD0iMC42IiBmaWxsPSIjMGIxMTIwIi8+PHJlY3QgeD0iMTQiIHk9IjE5IiB3aWR0aD0iNCIgaGVpZ2h0PSIyLjQiIGZpbGw9IiMwYjExMjAiLz48cmVjdCB4PSI2IiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PHJlY3QgeD0iOSIgeT0iMjIuMiIgd2lkdGg9IjIiIGhlaWdodD0iMiIgZmlsbD0iI0U1QTMyRSIvPjxyZWN0IHg9IjEyIiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PHJlY3QgeD0iMTgiIHk9IjIyLjIiIHdpZHRoPSIyIiBoZWlnaHQ9IjIiIGZpbGw9IiNFNUEzMkUiLz48cmVjdCB4PSIyMSIgeT0iMjIuMiIgd2lkdGg9IjIiIGhlaWdodD0iMiIgZmlsbD0iI0U1QTMyRSIvPjxyZWN0IHg9IjI0IiB5PSIyMi4yIiB3aWR0aD0iMiIgaGVpZ2h0PSIyIiBmaWxsPSIjRTVBMzJFIi8+PC9zdmc+Cg==">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="hero">
-  <div class="wrap">
-    <p class="kicker">a homage to nix + RAM — colloquially, <em>you don't have RAM</em></p>
-    <h1 class="title">nixram</h1>
-    <p class="tagline">
-      Declare a RAM level. Get coherent zram/zswap sizing, PSI-armed
-      systemd-oomd, and <code>vm.*</code> sysctl tuning — derived from one
-      table, instead of a dozen loosely-related knobs you hand-pick and hope
-      agree with each other.
-    </p>
-    <div class="get-it">
-      <a class="button" href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub repository →</a>
-      <code>nix run github:julian-corbet/nixram-corbet-ch#detect-level</code>
+  <nav>
+    <a href="#" class="nav-brand">nixram</a>
+    <div class="nav-links">
+      <a href="#levels">Levels</a>
+      <a href="#decisions">Decisions</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub</a>
+      <a href="#get-started" class="btn-nav">Get started</a>
+    </div>
+  </nav>
+
+  <div class="hero-content">
+    <h1>nixram</h1>
+    <p class="tagline">Declare a RAM level. Everything else follows.</p>
+    <p class="subtitle">One small NixOS module derives a coherent memory-pressure policy from a single declared RAM level — zram (or zswap) sizing, PSI-armed <code>systemd-oomd</code>, and the <code>vm.*</code> sysctl layer, all from one table. Every value it sets is tagged <strong>sourced</strong>, <strong>extrapolated</strong>, or <strong>kernel default</strong>, so nothing reads as more settled than it is.</p>
+    <div class="cta">
+      <a href="#get-started" class="btn btn-primary">Get started</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </div>
+
+  <div class="hero-demo">
+    <div class="terminal">
+      <div class="terminal-header">
+        <div class="terminal-dots"><span></span><span></span><span></span></div>
+        <span class="terminal-title">nixram — detect once, paste once</span>
+      </div>
+      <pre class="terminal-body"><code><span class="prompt">$</span> <span class="cmd">nix run github:julian-corbet/nixram-corbet-ch#detect-level</span>
+<span class="output">Detected: 3931 MiB total RAM (/proc/meminfo MemTotal)
+Nearest nixram level (rounded UP to the next anchor, never down): 4G
+
+This is a 'detect once, paste once' tool, not a live auto-detector:
+run it on the target machine, then paste the line below into your
+NixOS configuration and commit it like any other hardware fact.</span>
+
+    <span class="paste">services.nixram.level = "4G";</span>
+
+<span class="comment"># then wire the module into your flake + configuration:</span>
+<span class="comment"># flake.nix</span>
+inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";
+<span class="comment"># configuration.nix</span>
+imports = [ inputs.nixram.nixosModules.nixram ];
+services.nixram = {
+  enable = true;
+  level = "4G";
+};</code></pre>
     </div>
   </div>
 </header>
 
-<main class="wrap">
+<main>
 
-  <section id="thesis">
-    <h2 class="section-title"><span class="num">01</span>The thesis</h2>
-    <p class="lede">
-      zram's <code>disksize</code> is only a cheap, virtual ceiling, and the
-      real physical cost is bounded separately by
-      <code>zram-resident-limit</code>, kept inside a conservative fraction of
-      RAM at every tier — so disksize can afford to be generous, and
-      compression gets room to stretch the same physical spend further
-      before hitting a wall. systemd-oomd is armed on PSI (pressure stall
-      information), not on swap-used percentage, because stall time is
-      medium-agnostic and a percentage-of-disksize detector would be reading
-      the wrong number under this sizing model. Every value nixram sets is
-      tagged <b>sourced</b>, <b>extrapolated</b>, or <b>kernel default</b>, so
-      nothing here is presented as more settled than it actually is.
-    </p>
-  </section>
-
-  <hr class="rule">
-
-  <section id="instrument">
-    <h2 class="section-title"><span class="num">02</span>The instrument</h2>
-    <p class="lede">
-      Pages fall out of ordinary memory and land in the compressed pool.
-      Watch what happens to their size on the way in.
-    </p>
-    <div class="instrument-frame">
-      <canvas id="instrument-canvas" aria-hidden="true"></canvas>
+<section class="how-it-works">
+  <div class="container">
+    <h2>How it works</h2>
+    <p class="section-intro">No eval-time guessing. Nix evaluation is pure and static — it can't read a target machine's live memory — so the RAM level is a fact you detect once and commit, not something the build infers behind your back.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Detect once</h3>
+        <p>Run <code>detect-level</code> on the target machine. It reads <code>/proc/meminfo</code> and rounds <strong>up</strong> to the next of the fourteen anchors, never down, then prints a ready-to-paste line.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Paste once</h3>
+        <p>Commit <code>services.nixram.level</code> like any other hardware fact. There is no default level and no eval-time auto-detection — leaving it unset is a hard error, by design.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Everything derives</h3>
+        <p>The zram device and its sizing, <code>systemd-oomd</code>'s PSI arming, and the whole <code>vm.*</code> sysctl layer all resolve from one table — every value with an escape hatch if you disagree.</p>
+      </div>
     </div>
-    <p class="instrument-caption sr-only">
-      A diagram: small squares representing memory pages drift downward and
-      shrink as they compress into a pool at the bottom of the frame. The
-      pool's physical height is capped by a solid amber line labeled
-      "zram-resident-limit — the real budget". A taller dashed teal line
-      further up is labeled "disksize — the virtual ceiling". Because pages
-      shrink as they compress, more logical pages fit under the amber line
-      than would fit if they stayed full size.
-    </p>
-    <p class="instrument-caption" aria-hidden="true">
-      Amber — <code>zram-resident-limit</code>, the real, physical wall.
-      Teal, dashed — <code>disksize</code>, a generous virtual ceiling that
-      costs nothing once the amber line is doing the actual safety job.
-    </p>
-  </section>
+  </div>
+</section>
 
-  <hr class="rule">
+<section class="model">
+  <div class="container">
+    <h2>The model</h2>
+    <p class="section-intro">nixram's central thesis in one picture: <code>disksize</code> is only a cheap virtual ceiling, and the real physical cost is bounded separately by <code>zram-resident-limit</code>. Budget the physical, and the virtual can afford to be generous.</p>
 
-  <section id="levels">
-    <h2 class="section-title"><span class="num">03</span>The 14-level explorer</h2>
-    <p class="lede">
-      Fourteen RAM anchors, 256M through 128G, each a complete, coherent set
-      of values — copied straight from <code>levels.nix</code>. Every value
-      carries its own honesty badge; nothing here is presented as more
-      settled than it actually is.
-    </p>
+    <div class="model-panel">
+      <svg class="model-diagram" viewBox="0 0 660 340" role="img" aria-labelledby="model-title model-desc">
+        <title id="model-title">nixram sizing model</title>
+        <desc id="model-desc">A machine RAM column. An amber solid line marks zram-resident-limit, the physical budget at about 35 percent of RAM, with compressed pages packed beneath it. A teal dashed line well above marks disksize, the virtual ceiling, which can reach up to twice RAM.</desc>
+
+        <!-- RAM column -->
+        <rect x="70" y="100" width="230" height="210" fill="rgba(255,255,255,0.025)" stroke="rgba(255,255,255,0.13)" stroke-width="1"/>
+
+        <!-- guides showing virtual space rising above physical RAM -->
+        <line x1="70" y1="100" x2="70" y2="55" stroke="rgba(62,197,180,0.35)" stroke-width="1" stroke-dasharray="3 4"/>
+        <line x1="300" y1="100" x2="300" y2="55" stroke="rgba(62,197,180,0.35)" stroke-width="1" stroke-dasharray="3 4"/>
+
+        <!-- compressed pages packed under the physical budget -->
+        <rect x="74" y="238" width="222" height="70" fill="rgba(229,163,46,0.16)" stroke="rgba(229,163,46,0.45)" stroke-width="1"/>
+        <line x1="74" y1="255.5" x2="296" y2="255.5" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
+        <line x1="74" y1="273" x2="296" y2="273" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
+        <line x1="74" y1="290.5" x2="296" y2="290.5" stroke="rgba(229,163,46,0.30)" stroke-width="1"/>
+        <text class="d-mono" x="185" y="279" text-anchor="middle" font-size="12" fill="#E5A32E">compressed pages</text>
+
+        <!-- physical RAM 100% marker -->
+        <line x1="55" y1="100" x2="430" y2="100" stroke="#5b6678" stroke-width="1" stroke-dasharray="2 4"/>
+        <text x="445" y="104" font-size="12" fill="#7c8494">physical RAM · 100%</text>
+
+        <!-- teal dashed: disksize / virtual ceiling -->
+        <line x1="55" y1="55" x2="430" y2="55" stroke="#3EC5B4" stroke-width="2.4" stroke-dasharray="9 5"/>
+        <text class="d-mono" x="445" y="52" font-size="14" fill="#3EC5B4">disksize</text>
+        <text x="445" y="69" font-size="11.5" fill="#8b93a3">virtual ceiling · up to 2× RAM</text>
+
+        <!-- amber solid: zram-resident-limit / physical budget -->
+        <line x1="55" y1="236" x2="430" y2="236" stroke="#E5A32E" stroke-width="2.6"/>
+        <text class="d-mono" x="445" y="233" font-size="14" fill="#E5A32E">zram-resident-limit</text>
+        <text x="445" y="250" font-size="11.5" fill="#8b93a3">physical budget · ~35% of RAM</text>
+
+        <!-- headroom arrow between physical budget and virtual ceiling -->
+        <line x1="332" y1="63" x2="332" y2="229" stroke="#6b7280" stroke-width="1.2"/>
+        <polygon points="332,57 328,66 336,66" fill="#6b7280"/>
+        <polygon points="332,235 328,226 336,226" fill="#6b7280"/>
+        <text x="347" y="146" font-size="11" fill="#8b93a3" text-anchor="middle" transform="rotate(-90 347 146)">compression headroom</text>
+
+        <!-- column caption -->
+        <text class="d-mono" x="185" y="330" text-anchor="middle" font-size="12" fill="#8b93a3">machine RAM</text>
+      </svg>
+    </div>
+
+    <div class="arch-details">
+      <div class="arch-detail">
+        <h3>Virtual ceiling</h3>
+        <p><code>disksize</code> is cheap address space — deliberately generous where it counts: up to 2× RAM on the smallest tiers and full-RAM through the middle, before the <code>/2</code> taper and 16 GiB cap bring it back inside upstream's 0.1–0.5 guidance on the largest boxes. Once a resident limit is doing the real safety job, a bigger virtual ceiling costs nothing but lets compression stretch the same physical spend further before hitting a wall.</p>
+      </div>
+      <div class="arch-detail">
+        <h3>Physical budget</h3>
+        <p><code>zram-resident-limit</code> caps the real physical spend inside a conservative fraction of RAM at every tier up to 32G — half of RAM on the smallest boxes, tapering to 35% once there is slack to share. From 64G up it is deliberately unset, because <code>disksize</code> itself already caps physical spend at ≤25% of RAM.</p>
+      </div>
+      <div class="arch-detail">
+        <h3>PSI, not percentages</h3>
+        <p><code>systemd-oomd</code> is armed on pressure-stall time, which is medium-agnostic. A swap-used percentage measured against the inflated <code>disksize</code> denominator is the wrong number, so <code>SwapUsedLimit</code> is not configured at all — not as a decorative backstop, not anywhere.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="levels" class="levels">
+  <div class="container">
+    <h2>The levels</h2>
+    <p class="section-intro">Fourteen RAM-size anchors, 256M through 128G, each a complete and coherent set of values. <code>ram</code> is zram-generator's own variable for total detected RAM in MiB — the formulas are evaluated against real <code>/proc/meminfo</code> at boot, so the <em>formula</em> is what's tiered, not a number baked in per level.</p>
+
     <div class="legend">
-      <span><b class="b-sourced">●</b> sourced</span>
-      <span><b class="b-extrapolated">◐</b> extrapolated</span>
-      <span><b class="b-default">○</b> kernel default</span>
+      <span><span class="badge badge-sourced" aria-hidden="true"></span> sourced — an upstream distro or kernel-doc default, applied as-is</span>
+      <span><span class="badge badge-extrapolated" aria-hidden="true"></span> extrapolated — nixram's own curve; reasoned, not measured</span>
+      <span><span class="badge badge-default" aria-hidden="true"></span> kernel default — deliberately left untouched</span>
     </div>
+
     <div class="table-scroll">
-      <table>
+      <table class="levels-table">
         <thead>
           <tr>
             <th>Level</th>
@@ -416,433 +179,308 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td>256M</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd(level=1)</code> <span class="badge b-extrapolated">◐</span></td><td>off <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>off <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>512M</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>1G</td><td><code>ram * 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>ram / 2</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>200 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>2G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>4G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>6G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>8G</td><td><code>ram</code> <span class="badge b-sourced">●</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>150 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>10G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>12G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>16G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>24G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>32G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td><code>ram * 35 / 100</code> <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>125 <span class="badge b-sourced">●</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>64G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td>unset (null) <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>100 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
-          <tr><td>128G</td><td><code>min(ram / 2, 16384)</code> <span class="badge b-extrapolated">◐¹</span></td><td>unset (null) <span class="badge b-extrapolated">◐</span></td><td><code>zstd</code> <span class="badge b-sourced">●</span></td><td><code>zstd(level=12)</code>, daily <span class="badge b-extrapolated">◐</span></td><td>100 <span class="badge b-extrapolated">◐</span></td><td>on <span class="badge b-extrapolated">◐</span></td></tr>
+          <tr>
+            <td><span class="lvl">256M</span></td>
+            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd(level=1)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">off</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">off</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">512M</span></td>
+            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">1G</span></td>
+            <td><span class="val">ram * 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram / 2</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">200</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">2G</span></td>
+            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">4G</span></td>
+            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">6G</span></td>
+            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">8G</span></td>
+            <td><span class="val">ram</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">150</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">10G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">12G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">16G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">24G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">32G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">ram * 35 / 100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">125</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">64G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">unset (null)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
+          <tr>
+            <td><span class="lvl">128G</span></td>
+            <td><span class="val">min(ram / 2, 16384)</span><sup class="fn">1</sup> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">unset (null)</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">zstd</span> <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td>
+            <td><span class="val">zstd(level=12), daily</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">100</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+            <td><span class="val">on</span> <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td>
+          </tr>
         </tbody>
       </table>
     </div>
-    <p class="footnote">
-      ¹ the <code>/2</code> taper is extrapolated; the 16384 MiB (16 GiB) cap
-      it approaches is sourced (Pop!_OS). At 32G the two meet exactly
-      (32 / 2 = 16).
-    </p>
+    <p class="table-note"><sup class="fn">1</sup> The <span class="mono">/2</span> taper is extrapolated <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span>; the 16384 MiB (16 GiB) cap it approaches is sourced <span class="badge badge-sourced" title="sourced" aria-label="sourced"></span> (Pop!_OS). At 32G the two meet exactly (32 / 2 = 16). <code>oomd</code> here is <code>oomd.enable</code>; when on, its PSI thresholds are the shared constants below, not per-level values.</p>
 
-    <h3 class="subhead">Constants shared by every level</h3>
-    <p class="subhead-note">
-      Properties of the swap medium (zram) or the reclaim/OOM machinery, not
-      the box — they don't vary by RAM size.
-    </p>
-    <div class="const-grid">
-      <div class="const-card"><span class="k">vm.swappiness</span><span class="v">180 <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">vm.page-cluster</span><span class="v">0 <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">vm.watermark_boost_factor</span><span class="v">0 <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">vm.min_free_kbytes</span><span class="v">untouched <span class="badge b-default">○</span></span></div>
-      <div class="const-card"><span class="k">MGLRU min_ttl_ms</span><span class="v">1000 <span class="badge b-sourced">●</span>, flagged</span></div>
-      <div class="const-card"><span class="k">PSI threshold</span><span class="v">60% / 30s <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">zram swap-priority</span><span class="v">100 <span class="badge b-sourced">●</span></span></div>
+    <p class="cards-lead">Level by level — why each tier is shaped the way it is</p>
+    <div class="level-cards">
+      <div class="level-card">
+        <h3><span class="lvl">256M</span> — the survival tier</h3>
+        <p>Everything here is rationed twice over: RAM, and the CPU to compress it. <code>disksize</code> is <code>ram * 2</code> because compression is the only headroom this box will ever have, and the resident limit at half of RAM caps how much of that reach can become physical spend. <code>zstd(level=1)</code> rather than plain <code>zstd</code>: every page fault costs CPU on a machine that has almost none to spare. <code>systemd-oomd</code> stays off — its own RSS is an unmeasured fraction of a very small total — so the kernel OOM killer plus the <code>OOMScoreAdjust = -900</code> protection layer stands guard alone. Recompression off: a pool that tops out around ~512M logical can't repay a second pass.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">512M</span> — first full-strength tier</h3>
+        <p>The same 2× / ½ shape as 256M, but nothing needs rationing twice anymore: plain <code>zstd</code> is affordable, oomd is armed (its RSS is a far smaller fraction of the box), and the daily idle-recompression pass starts paying — tens of MB back, on a machine where tens of MB are percent-of-RAM money.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">1G</span> — the small-box shape holds</h3>
+        <p>The last tier of the small-box shape: double-RAM virtual reach, half-of-RAM physical budget. From here down the box lives or dies by compression stretch. <code>watermark_scale_factor</code> stays at 200 across all three small tiers: any fixed percentage of a tiny zone is a tiny absolute number of free pages, so kswapd must start reclaiming earlier to leave real headroom.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">2G</span> — the sourced middle begins</h3>
+        <p><code>disksize</code> drops to plain <code>ram</code> — Fedora's own shipped default (full-RAM scaling), the best-sourced point on the entire curve. The physical budget tapers from ½ to 35%: with multiple GB present, the compressed pool no longer needs to be allowed half the machine to be useful. Watermarks relax to 150.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">4G</span> — the reference tier</h3>
+        <p>The most ordinary row in the table — <code>disksize</code> sourced from Fedora, the standard 35% budget, every shared constant at its normal value. To understand nixram's model, read this row first: every other tier is this row with one scarcity turned up or down.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">6G</span> / <span class="lvl">8G</span> — same row, more slack</h3>
+        <p>Nothing changes but the numbers the same expressions resolve to. 8G is the last tier where a full-RAM <code>disksize</code> is still the right ceiling — it's also exactly where Fedora's own default stops scaling (<code>min(ram, 8192)</code>). Past 8 GiB, a swap absorber sized to the whole machine is more than a box that large can usefully drain before a timely OOM decision beats stretching compression any further, so at 10G the ceiling hands over to the bounded <code>/2</code> taper.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">10G</span> — the taper begins</h3>
+        <p><code>disksize</code> switches to <code>min(ram / 2, 16384)</code>. The need for swap capacity stops scaling with RAM: a 10G box under pressure doesn't want 10G of swap, it wants a bounded absorber and then a timely OOM decision. The <code>/2</code> taper is what binds through 32G (5G of reach here); the 16 GiB cap in the formula is Pop!_OS's shipped ceiling, waiting to take over. Watermarks reach the Pop-validated 125.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">12G</span> / <span class="lvl">16G</span> / <span class="lvl">24G</span> — the plateau</h3>
+        <p>The <code>/2</code> taper walks the ratio down: 6G of reach on a 12G box, 8G on 16G, 12G on 24G. The shrinking fraction is the point, not a side effect — what absorbs a bounded working-set overflow is an absolute number of GiB of cold-page parking, not a fixed percentage of a machine that keeps growing. Once the absorber is big enough to hold the cold set, more capacity only delays the OOM decision a larger box should be making sooner, so the reach is deliberately let fall as a share of RAM while staying inside the same 35% physical budget.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">32G</span> — where taper meets cap</h3>
+        <p>32 / 2 = 16: the one tier where the taper and the 16 GiB cap agree exactly. Above this line the cap alone rules and RAM size stops mattering to the absorber entirely.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">64G</span> — the budget retires</h3>
+        <p>The resident limit is deliberately unset. <code>disksize</code> (16G) is already ≤25% of RAM — a physical bound tighter than the 35% rule would produce — so a second cap would be decoration, not protection. Flagged as an open question rather than proven. Watermarks ease to 100: kswapd can afford to be lazy here. For a box running one huge, non-swap-shaped workload, the honest alternative is <code>mode = "none"</code> — oomd and sysctls without any swap medium.</p>
+      </div>
+      <div class="level-card">
+        <h3><span class="lvl">128G</span> — the cap is the whole story</h3>
+        <p>16G of absorber on a machine with eight times that much RAM. zram at this scale is not survival — it's a parking lot for cold pages that would otherwise squat on hot RAM for months of uptime. Everything else as 64G.</p>
+      </div>
     </div>
 
-    <h3 class="subhead">Zswap profile (<code>mode = "zswap"</code>)</h3>
-    <p class="subhead-note">
-      A separate, flat profile for laptops and desktops with real disk-backed
-      swap.
-    </p>
-    <div class="const-grid">
-      <div class="const-card"><span class="k">zswap.max_pool_percent</span><span class="v">20 <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">zswap.accept_threshold_percent</span><span class="v">90 <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">zswap.shrinker_enabled</span><span class="v">on <span class="badge b-extrapolated">◐</span></span><span class="footnote" style="margin-top:0.2rem;">upstream default is off</span></div>
-      <div class="const-card"><span class="k">zswap.zpool</span><span class="v">zsmalloc <span class="badge b-sourced">●</span></span><span class="footnote" style="margin-top:0.2rem;">only option left on current kernels</span></div>
-      <div class="const-card"><span class="k">vm.swappiness</span><span class="v">120 <span class="badge b-extrapolated">◐</span></span></div>
-      <div class="const-card"><span class="k">vm.page-cluster</span><span class="v">2 (SSD) / 3, untouched (HDD) <span class="badge b-sourced">●</span></span></div>
-      <div class="const-card"><span class="k">vm.watermark_scale_factor</span><span class="v">125, flat <span class="badge b-sourced">●</span></span></div>
+    <div class="strip-grid">
+      <div class="strip">
+        <h3>Constants shared by every level</h3>
+        <p>Properties of the swap medium (zram) or the reclaim/OOM machinery — not the box — so they don't vary by RAM size.</p>
+        <div class="kv-scroll">
+        <table class="kv">
+          <tbody>
+            <tr><td>vm.swappiness</td><td>180</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>vm.page-cluster</td><td>0</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>vm.watermark_boost_factor</td><td>0</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>vm.min_free_kbytes</td><td>untouched</td><td><span class="badge badge-default" title="kernel default" aria-label="kernel default"></span></td></tr>
+            <tr><td>MGLRU min_ttl_ms</td><td>1000 <span class="note">flagged</span></td><td><span class="badge badge-sourced" title="sourced, flagged" aria-label="sourced, flagged"></span></td></tr>
+            <tr><td>PSI threshold</td><td>60% / 30s</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>zram swap-priority</td><td>100</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+      <div class="strip">
+        <h3>Zswap profile <span class="mono" style="color:var(--text-dim);font-weight:400;font-size:0.8rem;">(mode = "zswap")</span></h3>
+        <p>A separate, flat profile for laptops and desktops with real disk-backed swap — a compressed cache in front of the swap device, not a device itself.</p>
+        <div class="kv-scroll">
+        <table class="kv">
+          <tbody>
+            <tr><td>zswap.max_pool_percent</td><td>20</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>zswap.accept_threshold_percent</td><td>90</td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>zswap.shrinker_enabled</td><td>on <span class="note">upstream off</span></td><td><span class="badge badge-extrapolated" title="extrapolated — upstream default is off" aria-label="extrapolated — upstream default is off"></span></td></tr>
+            <tr><td>zswap.zpool</td><td>zsmalloc</td><td><span class="badge badge-sourced" title="sourced — only option left" aria-label="sourced — only option left"></span></td></tr>
+            <tr><td>vm.swappiness</td><td>120</td><td><span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span></td></tr>
+            <tr><td>vm.page-cluster</td><td>2 SSD <span class="note">/ 3 HDD</span></td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+            <tr><td>vm.watermark_scale_factor</td><td>125 <span class="note">flat</span></td><td><span class="badge badge-sourced" title="sourced" aria-label="sourced"></span></td></tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
     </div>
-  </section>
+  </div>
+</section>
 
-  <hr class="rule">
-
-  <section id="decisions">
-    <h2 class="section-title"><span class="num">04</span>Decision cards</h2>
-    <p class="lede">
-      Every card is one decision, one line of reasoning, and its honesty
-      class. Two are flagged: one because it deliberately breaks with
-      upstream guidance, one because it deliberately configures nothing at
-      all.
-    </p>
-    <div class="card-grid">
-
-      <div class="card flag-amber">
-        <span class="flag-label">Amber-flagged</span>
-        <h4>Disksize exceeds upstream guidance — deliberately</h4>
-        <p>
-          zram-generator's own docs recommend sizing disksize to 0.1–0.5 of
-          RAM. Every level here exceeds that, up to 2x RAM at the smallest
-          tiers, because disksize is only the virtual ceiling once a
-          resident limit is doing the real physical-safety job.
-        </p>
-        <span class="honesty b-extrapolated">◐ extrapolated curve, sourced endpoints</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#1-zram-disksize-curve">rationale.md [1] →</a>
-      </div>
-
-      <div class="card flag-red">
-        <span class="flag-label">Red-flagged</span>
-        <h4>SwapUsedLimit / ManagedOOMSwap: not configured anywhere</h4>
-        <p>
-          Not a decorative backstop left at a safe default — genuinely
-          absent, at every level. A swap-used percentage reads the wrong
-          number once disksize is deliberately inflated beyond the real
-          budget; PSI has no such blind spot.
-        </p>
-        <span class="honesty">dropped by decision, not by oversight</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere">faq.md →</a>
-      </div>
-
-      <div class="card">
-        <h4>PSI-only OOM detection</h4>
-        <p>
-          systemd-oomd is armed on memory-pressure stall time, never on
-          swap-used percentage. Stall time is medium-agnostic — it doesn't
-          care whether the swap is zram, zswap, or disk.
-        </p>
-        <span class="honesty b-sourced">● sourced (systemd-oomd upstream defaults)</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#10-psi-thresholds-60--30s">rationale.md [10] →</a>
-      </div>
-
-      <div class="card">
-        <h4>Detect once, paste once</h4>
-        <p>
-          Nix evaluation is pure and static — it can't read a target
-          machine's live <code>/proc/meminfo</code>. No default level, no
-          eval-time auto-detection: a detector app prints a line you paste
-          into your own config and commit, like any other hardware fact.
-        </p>
-        <span class="honesty">a deliberate non-goal, not a missing convenience</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-does-level-have-no-default-and-no-eval-time-auto-detection">faq.md →</a>
-      </div>
-
-      <div class="card">
-        <h4>Idle recompression: two-phase rolling timer</h4>
-        <p>
-          A naive mark-then-recompress pass would recompress the entire pool
-          every run. Marking and recompressing are split across two timer
-          firings, so "idle" means one full interval of real non-use. Idle
-          tier: <code>zstd(level=12)</code> — the densest setting below
-          zstd's optimal-parser cost cliff, not 19.
-        </p>
-        <span class="honesty b-extrapolated">◐ extrapolated design, sourced kernel primitive</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#11-idle-recompression">rationale.md [11] →</a>
-      </div>
-
-      <div class="card">
-        <h4>No min_free_kbytes formula</h4>
-        <p>
-          No distro default or kernel doc reviewed offers a universal
-          per-tier formula that generalizes across 256M–128G. Rather than
-          invent one, the kernel's own computed value is left untouched at
-          every level — an override exists only for operators who've
-          measured their own workload.
-        </p>
-        <span class="honesty b-default">○ kernel default — not a nixram opinion</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#6-vmmin_free_kbytes-untouched">rationale.md [6] →</a>
-      </div>
-
-      <div class="card">
-        <h4>The honesty taxonomy itself, as a feature</h4>
-        <p>
-          Every tunable is tagged sourced, extrapolated, or kernel default —
-          out loud, in the code comments, the table, and here. Nothing is
-          presented as more settled than it actually is, and the numbering
-          behind each tag is load-bearing across the whole module.
-        </p>
-        <span class="honesty">the taxonomy is the product, not documentation of it</span>
-        <a class="doclink" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">rationale.md →</a>
-      </div>
-
+<section id="decisions" class="decisions">
+  <div class="container">
+    <h2>Decisions</h2>
+    <p class="section-intro">The deliberate calls — the places nixram departs from a default on purpose, and says so out loud. Each links to the numbered reasoning behind it.</p>
+    <div class="feature-grid">
+      <a class="feature feature--amber" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#1-zram-disksize-curve">
+        <span class="flag flag--amber">deliberate departure</span>
+        <h3>Exceeds upstream guidance — deliberately</h3>
+        <p>zram-generator recommends a <code>disksize</code> fraction of 0.1–0.5 of RAM. The small and mid tiers exceed it — up to 2× RAM below 2G, full-RAM at 2G–8G — while the 10G+ <code>/2</code> taper and 16 GiB cap bring <code>disksize</code> back to ≤0.5× RAM (0.25× at 64G, 0.125× at 128G). Exceeding it where it does isn't an oversight: <code>disksize</code> is only the virtual ceiling, and <code>zram-resident-limit</code> does the real physical-safety job, so a generous ceiling just gives compression room to stretch.</p>
+        <span class="more">Read rationale [1] →</span>
+      </a>
+      <a class="feature feature--red" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere">
+        <span class="flag flag--red">dropped by decision</span>
+        <h3>SwapUsedLimit: not configured anywhere</h3>
+        <p>A swap-used percentage is measured against <code>disksize</code> — which nixram deliberately inflates past the real budget. It would read "plenty of headroom" right up until the resident-limit wall is hit. Not a decorative backstop, not an oversight — it is not configured at all.</p>
+        <span class="more">Read the FAQ →</span>
+      </a>
+      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#10-psi-thresholds-60--30s">
+        <h3>PSI-only OOM detection</h3>
+        <p><code>systemd-oomd</code> is armed on memory-pressure stall time — 60% over 30s, systemd's own upstream defaults — and nothing else. Stall time is medium-agnostic: it doesn't care whether swap is zram, zswap, or a disk partition, or how large its nominal capacity looks.</p>
+        <span class="more">Read rationale [10] →</span>
+      </a>
+      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md#why-does-level-have-no-default-and-no-eval-time-auto-detection">
+        <h3>Detect once, paste once</h3>
+        <p>Nix evaluation is pure and static — it can't read a machine's live <code>/proc/meminfo</code>. A silent eval-time guess would trade a wrong policy for the appearance of convenience, so <code>level</code> has no default and leaving it unset is a hard error. You run the detector once and commit the line.</p>
+        <span class="more">Read the FAQ →</span>
+      </a>
+      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md#11-idle-recompression">
+        <h3>Idle recompression, two-phase</h3>
+        <p>The kernel never recompresses on its own; userspace drives it. A rolling timer marks the resident set idle on one firing and recompresses what stayed untouched on the next, so "idle" reflects a real dwell period. The dense <code>zstd(level=12)</code> idle tier is free at read time — zstd's decompression speed is essentially level-independent.</p>
+        <span class="more">Read rationale [11] →</span>
+      </a>
+      <a class="feature" href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">
+        <h3>An honesty taxonomy</h3>
+        <p>Every value carries a tag: <span class="badge badge-sourced" aria-hidden="true"></span> sourced, <span class="badge badge-extrapolated" aria-hidden="true"></span> extrapolated, or <span class="badge badge-default" aria-hidden="true"></span> kernel default. Extrapolated values are reasoned, not measured — open experiments, not settled facts — and results feed back into the table as tag upgrades over time.</p>
+        <span class="more">Read the rationale →</span>
+      </a>
     </div>
-  </section>
+  </div>
+</section>
 
-  <hr class="rule">
+<section id="get-started" class="get-started">
+  <div class="container">
+    <h2>Get started</h2>
+    <p class="section-intro">Two moves: find your level on the target machine, then wire the module into your flake.</p>
+    <div class="install-grid">
+      <div class="install-method">
+        <h3>Add the flake</h3>
+        <p>Point an input at the flake, import the module, and enable it at your level.</p>
+        <pre><code><span class="comment"># flake.nix</span>
+inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";
 
-  <section id="quickstart">
-    <h2 class="section-title"><span class="num">05</span>Quickstart</h2>
-    <pre class="snippet"><code><span class="tok-punc">{</span>
-  <span class="tok-key">inputs.nixram.url</span> <span class="tok-punc">=</span> <span class="tok-str">"github:julian-corbet/nixram-corbet-ch"</span><span class="tok-punc">;</span>
-<span class="tok-punc">}</span>
-<span class="tok-com"># in your nixosSystem modules:</span>
-<span class="tok-key">imports</span> <span class="tok-punc">=</span> <span class="tok-punc">[</span> <span class="tok-key">inputs.nixram.nixosModules.nixram</span> <span class="tok-punc">];</span>
-<span class="tok-key">services.nixram</span> <span class="tok-punc">=</span> <span class="tok-punc">{</span>
-  <span class="tok-key">enable</span> <span class="tok-punc">=</span> <span class="tok-key">true</span><span class="tok-punc">;</span>
-  <span class="tok-key">level</span> <span class="tok-punc">=</span> <span class="tok-str">"4G"</span><span class="tok-punc">;</span>  <span class="tok-com"># find yours: nix run github:julian-corbet/nixram-corbet-ch#detect-level</span>
-<span class="tok-punc">};</span></code></pre>
-  </section>
+<span class="comment"># in your nixosSystem modules:</span>
+imports = [ inputs.nixram.nixosModules.nixram ];
+services.nixram = {
+  enable = true;
+  level = "4G";
+};</code></pre>
+      </div>
+      <div class="install-method">
+        <h3>Find your level</h3>
+        <p>Run this on the target machine — it prints the exact line to paste above.</p>
+        <pre><code>nix run \
+  github:julian-corbet/nixram-corbet-ch#detect-level</code></pre>
+      </div>
+    </div>
+    <p class="honesty-note"><strong>No default level, no auto-detection — by design.</strong> Run the detector on the target machine once, then commit the line it prints like any other hardware fact. A build can't read a machine's live memory, and a silent guess would be a footgun, not a convenience.</p>
+  </div>
+</section>
 
 </main>
 
 <footer>
-  <div class="wrap">
-    <span>MIT licensed.</span>
-    <span><a href="https://github.com/julian-corbet/nixram-corbet-ch">github.com/julian-corbet/nixram-corbet-ch</a></span>
-    <span>Values marked ◐ are reasoned, not measured — <code>experiments/</code> tracks what still needs measuring.</span>
+  <div class="container">
+    <div class="footer-links">
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/LICENSE">MIT</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch">GitHub</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/rationale.md">Rationale</a>
+      <a href="https://github.com/julian-corbet/nixram-corbet-ch/blob/main/docs/faq.md">FAQ</a>
+    </div>
+    <p>MIT · <a href="https://github.com/julian-corbet/nixram-corbet-ch">github.com/julian-corbet/nixram-corbet-ch</a></p>
+    <p class="footer-note">Values marked extrapolated <span class="badge badge-extrapolated" title="extrapolated" aria-label="extrapolated"></span> are reasoned, not measured — <code>experiments/</code> tracks what still needs measuring.</p>
   </div>
 </footer>
-
-<script>
-(function () {
-  "use strict";
-
-  var canvas = document.getElementById("instrument-canvas");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-
-  var reduceMotion = window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Theme colors are read from CSS so the canvas follows light/dark
-  // automatically; only the two brand colors are fixed by design.
-  var AMBER = "#E5A32E";
-  var TEAL = "#3EC5B4";
-  var fg, fgDim, dividerBg;
-
-  function readTheme() {
-    var cs = getComputedStyle(document.documentElement);
-    fg = cs.getPropertyValue("--fg").trim() || "#1A2129";
-    fgDim = cs.getPropertyValue("--fg-dim").trim() || "#4A5560";
-    dividerBg = cs.getPropertyValue("--bg-alt").trim() || "#EDF1F4";
-  }
-  readTheme();
-
-  var width = 0, height = 0, dpr = Math.max(1, window.devicePixelRatio || 1);
-  var tealY = 0, amberY = 0; // reference line y-positions, CSS px
-
-  function resize() {
-    var rect = canvas.parentElement.getBoundingClientRect();
-    width = rect.width - 24; // minus frame padding
-    height = 340;
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    tealY = height * 0.24;   // virtual ceiling: high up, generous
-    amberY = height * 0.60;  // physical budget: closer to the pool
-
-    buildPool();
-  }
-
-  // ---- The pool: a packed grid of compressed pages, capped by amberY ----
-  var CELL = 7;      // compressed page size, px
-  var cols, poolRows, poolCells; // poolCells: array of {age} or null
-
-  function buildPool() {
-    cols = Math.max(4, Math.floor(width / CELL));
-    poolRows = Math.max(2, Math.floor((height - amberY) / CELL));
-    poolCells = new Array(cols * poolRows).fill(null);
-  }
-
-  // ---- Falling pages: full-size, uncompressed, drifting toward the pool ----
-  var FULL_SIZE = 11;
-  var COMPRESS_MS = 500;
-  var pages = [];
-  var nextSpawn = 0;
-
-  function spawnPage(now) {
-    pages.push({
-      x: 10 + Math.random() * (width - 20),
-      y: -10 - Math.random() * 40,
-      speed: 18 + Math.random() * 10, // px/sec
-      size: FULL_SIZE,
-      compressing: false,
-      compressStart: 0,
-      fromX: 0, fromY: 0, toX: 0, toY: 0
-    });
-    nextSpawn = now + 550 + Math.random() * 500;
-  }
-
-  function firstEmptyCell() {
-    // Fill bottom row-up first; once full, recycle a random occupied cell
-    // (steady-state churn, standing in for idle recompression turnover).
-    for (var r = poolRows - 1; r >= 0; r--) {
-      for (var c = 0; c < cols; c++) {
-        var i = r * cols + c;
-        if (!poolCells[i]) return i;
-      }
-    }
-    return Math.floor(Math.random() * poolCells.length);
-  }
-
-  function cellCenter(i) {
-    var r = Math.floor(i / cols), c = i % cols;
-    return {
-      x: c * CELL + CELL / 2,
-      y: height - (poolRows - r) * CELL + CELL / 2
-    };
-  }
-
-  var lastTime = null;
-
-  function step(now) {
-    if (nextSpawn === 0) nextSpawn = now;
-    var dt = lastTime === null ? 0 : (now - lastTime) / 1000;
-    lastTime = now;
-
-    if (now >= nextSpawn && pages.length < 40) spawnPage(now);
-
-    for (var i = pages.length - 1; i >= 0; i--) {
-      var p = pages[i];
-      if (!p.compressing) {
-        p.y += p.speed * dt;
-        if (p.y >= amberY) {
-          p.compressing = true;
-          p.compressStart = now;
-          p.fromX = p.x; p.fromY = p.y;
-          var idx = firstEmptyCell();
-          poolCells[idx] = { age: now };
-          var center = cellCenter(idx);
-          p.toX = center.x; p.toY = center.y;
-        }
-      } else {
-        var t = Math.min(1, (now - p.compressStart) / COMPRESS_MS);
-        p.x = p.fromX + (p.toX - p.fromX) * t;
-        p.y = p.fromY + (p.toY - p.fromY) * t;
-        p.size = FULL_SIZE + (CELL - 2 - FULL_SIZE) * t;
-        if (t >= 1) pages.splice(i, 1);
-      }
-    }
-
-    render(now);
-    raf = requestAnimationFrame(step);
-  }
-
-  function render(now) {
-    ctx.clearRect(0, 0, width, height);
-
-    // Pool region backdrop
-    ctx.fillStyle = dividerBg;
-    ctx.fillRect(0, amberY, width, height - amberY);
-
-    // Settled, compressed pages
-    for (var i = 0; i < poolCells.length; i++) {
-      var cell = poolCells[i];
-      if (!cell) continue;
-      var center = cellCenter(i);
-      var twinkle = now ? 0.75 + 0.25 * Math.sin((now / 900) + i) : 1;
-      ctx.fillStyle = AMBER;
-      ctx.globalAlpha = twinkle;
-      ctx.fillRect(center.x - (CELL - 2) / 2, center.y - (CELL - 2) / 2, CELL - 2, CELL - 2);
-      ctx.globalAlpha = 1;
-    }
-
-    // Falling / compressing pages
-    for (var j = 0; j < pages.length; j++) {
-      var p = pages[j];
-      var s = p.size;
-      var color = p.compressing
-        ? lerpColor(TEAL, AMBER, (now - p.compressStart) / COMPRESS_MS)
-        : TEAL;
-      ctx.fillStyle = color;
-      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
-    }
-
-    // Reference lines, drawn last so they read clearly over everything
-    ctx.save();
-    ctx.strokeStyle = TEAL;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([5, 5]);
-    ctx.beginPath();
-    ctx.moveTo(0, tealY);
-    ctx.lineTo(width, tealY);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.strokeStyle = AMBER;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, amberY);
-    ctx.lineTo(width, amberY);
-    ctx.stroke();
-
-    ctx.font = "12px " + '"SF Mono", "JetBrains Mono", monospace';
-    ctx.fillStyle = fgDim;
-    ctx.fillText("disksize — the virtual ceiling", 8, tealY - 8);
-    ctx.fillStyle = AMBER;
-    ctx.fillText("zram-resident-limit — the real budget", 8, amberY - 8);
-  }
-
-  function lerpColor(a, b, t) {
-    t = Math.max(0, Math.min(1, t));
-    var ca = hexToRgb(a), cb = hexToRgb(b);
-    var r = Math.round(ca.r + (cb.r - ca.r) * t);
-    var g = Math.round(ca.g + (cb.g - ca.g) * t);
-    var bl = Math.round(ca.b + (cb.b - ca.b) * t);
-    return "rgb(" + r + "," + g + "," + bl + ")";
-  }
-  function hexToRgb(hex) {
-    var n = parseInt(hex.slice(1), 16);
-    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-  }
-
-  var raf = null;
-
-  function renderStaticFrame() {
-    // One calm, representative frame: a full pool, a few pages mid-fall,
-    // one mid-compression — no requestAnimationFrame loop at all.
-    pages = [
-      { x: width * 0.3, y: height * 0.1, size: FULL_SIZE, compressing: false },
-      { x: width * 0.6, y: height * 0.32, size: FULL_SIZE, compressing: false },
-      { x: width * 0.45, y: amberY - 2, size: (FULL_SIZE + CELL) / 2, compressing: true, compressStart: -COMPRESS_MS * 0.5 }
-    ];
-    for (var i = 0; i < poolCells.length; i++) {
-      poolCells[i] = Math.random() < 0.94 ? { age: 0 } : null;
-    }
-    render(null);
-  }
-
-  function start() {
-    resize();
-    if (reduceMotion) {
-      renderStaticFrame();
-    } else {
-      raf = requestAnimationFrame(step);
-    }
-  }
-
-  var resizeTimer = null;
-  window.addEventListener("resize", function () {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      if (raf) cancelAnimationFrame(raf);
-      lastTime = null;
-      resize();
-      if (reduceMotion) {
-        renderStaticFrame();
-      } else {
-        raf = requestAnimationFrame(step);
-      }
-    }, 150);
-  });
-
-  if (window.matchMedia) {
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
-      readTheme();
-      if (reduceMotion) render(null);
-    });
-  }
-
-  start();
-})();
-</script>
 
 </body>
 </html>

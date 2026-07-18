@@ -28,8 +28,10 @@
 # THE CENTRAL CONFLICT, STATED PLAINLY (see docs/rationale.md [1] and
 # docs/faq.md for the long version): zram-generator's own upstream
 # documentation recommends zram-size fractions "in the range 0.1-0.5" of
-# RAM. Every disksize expression below exceeds that range -- up to 2x RAM
-# on the smallest tiers. This is deliberate, not an oversight. Under
+# RAM. The small and mid tiers exceed that range -- up to 2x RAM on the
+# smallest ones -- while the 10G+ /2 taper and 16GiB cap bring disksize
+# back inside it (<=25% of RAM by 64G). This is deliberate, not an
+# oversight. Under
 # nixram's resident-limit model, disksize is only the VIRTUAL ceiling;
 # the REAL physical budget is `zram.residentLimitExpr` (zram-resident-
 # limit), which stays inside a conservative fraction of RAM at every

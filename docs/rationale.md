@@ -29,8 +29,9 @@ The `ram * 2` multiplier below 2G is extrapolated. The `ram / 2` taper from
 zram-generator defaults scale disksize to full RAM capacity, capped at 8G
 (`min(ram, 8192)`). Pop!_OS's own default settings ship a 16 GiB ceiling.
 zram-generator's own upstream documentation recommends disksize fractions "in
-the range 0.1–0.5" of RAM — nixram's curve deliberately exceeds that range at
-every tier, up to 2x RAM on the smallest levels.
+the range 0.1–0.5" of RAM — nixram's curve deliberately exceeds that range on
+the small and mid tiers — up to 2x RAM on the smallest levels — before the
+10G+ /2 taper and 16 GiB cap bring it back inside (down to ≤25% of RAM by 64G).
 
 This is deliberate, not an oversight. Under nixram's resident-limit model,
 disksize is only the *virtual* ceiling; the real physical budget is
@@ -243,7 +244,7 @@ algorithm `zstd(level=12)`; off by default at 256M.
 `CONFIG_ZRAM_MULTI_COMP` exposes `recompress` and `idle` controls under
 `/sys/block/zramN/`, but the kernel never triggers recompression on its own —
 userspace has to drive it. The two-phase timer design, the "daily" cadence,
-and the `zstd(level=19)` idle-tier choice are all nixram's own extrapolated
+and the `zstd(level=12)` idle-tier choice are all nixram's own extrapolated
 design.
 
 **Reasoning:** a naive "mark idle, then immediately recompress what's marked
