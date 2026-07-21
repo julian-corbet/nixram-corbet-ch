@@ -93,6 +93,17 @@ Fresh project. Values marked extrapolated (◐) are reasoned, not measured;
 `experiments/README.md` tracks what still needs measuring, and results feed
 back into `levels.nix` as tag upgrades over time.
 
+## Related projects
+
+nixram is one of several small, independently-usable open-source projects
+sharing a common design system: **nixarch** (declarative Arch/CachyOS),
+**nixvps** (tiny sub-1GB NixOS VPS profiles),
+[nixremote](https://github.com/julian-corbet/nixremote-corbet-ch)
+(cross-machine native Wayland app forwarding), and
+[nixfish](https://github.com/julian-corbet/nixfish-corbet-ch) (the
+safe-adoption pattern for declarative fish shell config). nixram's own niche
+is purely memory-pressure tuning — usable alongside any of them, or standalone.
+
 ## License
 
 MIT.
