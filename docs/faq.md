@@ -34,9 +34,11 @@ one-time manual step, same as writing down a disk's UUID.
 ## What's the 0.1–0.5 disksize conflict, and why does nixram ignore it?
 
 zram-generator's own upstream documentation recommends sizing zram's
-disksize to a fraction "in the range 0.1–0.5" of total RAM. The small and mid
-tiers exceed that range — up to 2x RAM on the smallest ones — while the 10G+
-taper and 16 GiB cap bring disksize back inside it (≤25% of RAM by 64G)
+disksize to a fraction "in the range 0.1–0.5" of total RAM. nixram exceeds
+that range at every tier, by design: two flat fractions, not a taper — 100%
+of RAM (`ram`) at 256M/512M/1G, and 75% of RAM (`ram * 75 / 100`) at every
+tier from 2G through 128G. Neither fraction ever comes back down inside the
+0.1–0.5 band
 ([rationale.md \[1\]](rationale.md#1-zram-disksize-curve)).
 
 The short version: that guidance is written for setups where disksize is the
@@ -63,10 +65,15 @@ have fired early.
 
 PSI (pressure stall information) has no such blind spot: stall time is
 medium-agnostic. It doesn't care whether the swap medium is zram, zswap, or a
-disk partition, or how large its nominal capacity is. So nixram configures
-`ManagedOOMMemoryPressure` and nothing else, on every tier, and never sets
-`SwapUsedLimit` or `ManagedOOMSwap=kill` anywhere. This isn't "keep it as a
-decorative secondary backstop" — it's not configured at all.
+disk partition, or how large its nominal capacity is. So on every tier where
+systemd-oomd is armed at all, nixram configures `ManagedOOMMemoryPressure` and
+nothing else — never `SwapUsedLimit` or `ManagedOOMSwap=kill`, on any tier,
+armed or not. (systemd-oomd itself defaults off at 256M, a separate,
+independently-reasoned call about the daemon's own unmeasured RSS cost on the
+smallest tier — [rationale.md \[8\]](rationale.md#8-systemd-oomd-disabled-at-256m)
+— not a partial adoption of the swap-percentage detectors this entry is
+about.) This isn't "keep it as a decorative secondary backstop" — it's not
+configured at all.
 
 ## Why isn't zram+zswap offered as a combination?
 
@@ -113,23 +120,30 @@ leaving no trace, since the log line is there if you go looking.
 
 ## In-between RAM sizes round up to the next anchor — is that safe?
 
-Yes, with one honest caveat. `nix run <flake>#detect-level` rounds a
+Yes. `nix run <flake>#detect-level` rounds a
 machine's actual RAM up to the nearest of the fourteen anchors, never down.
-That's safe because every level's expressions are RAM-*relative* (`ram / 2`,
-`ram * 35 / 100`, and so on) — zram-generator evaluates them against the
-real `/proc/meminfo` at boot, not against the anchor's nominal `ramMiB`. A
-machine with, say, 20 GiB of RAM that rounds up to the "24G" level still gets
-disksize and resident-limit expressions computed from its real 20 GiB, not
-an imagined 24 GiB.
+That's safe because every level's expressions are RAM-*relative* (`ram * 30
+/ 100`, `ram * 25 / 100`, and so on) — zram-generator evaluates them against
+the real `/proc/meminfo` at boot, not against the anchor's nominal `ramMiB`.
+A machine with, say, 20 GiB of RAM that rounds up to the "24G" level still
+gets disksize and resident-limit expressions computed from its real 20 GiB,
+not an imagined 24 GiB. Every tier now sets a real resident-limit budget —
+there is no tier where it's left unset — so rounding never leaves a machine
+without a physical cap.
 
-The one place rounding has a real, honest consequence: rounding *into* the
-64G tier drops the resident limit entirely (it's unset from 64G up, see
-[rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model)). Any
-machine above 32 GiB and up to 64 GiB rounds into that tier. If you sit
-anywhere in that range and specifically want the 35% resident-limit budget
-kept rather than dropped, override it explicitly with
-`zram.residentLimitOverride` rather than relying on the rounded-up level's
-default.
+Both values are honest under rounding now, with no distortion left over from
+the old fixed-cap ceiling formula. Since `diskSizeExpr` and
+`residentLimitExpr` are both pure percentage-of-real-RAM formulas at every
+tier ([rationale.md \[1\]](rationale.md#1-zram-disksize-curve),
+[rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model)), a
+machine that rounds up into a bigger anchor still gets that anchor's
+percentages applied to its OWN real RAM, not the anchor's nominal size — a
+33 GiB machine that rounds up into the 64G tier gets 20% resident-limit and
+75% disksize evaluated against its real 33 GiB (6.6 GiB and ~24.75 GiB
+respectively), not the 64 GiB anchor's numbers. There's no fixed-cap
+distortion left to correct for; `zram.diskSizeOverride` and
+`zram.residentLimitOverride` remain available for anyone who wants to
+override either value directly regardless.
 
 ## Why not the legacy NixOS `zramSwap` module?
 

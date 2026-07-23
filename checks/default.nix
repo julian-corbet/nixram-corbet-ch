@@ -7,7 +7,7 @@
 # inspects what the module RENDERS into `config`. These check the
 # module's output values, never runtime behavior on a booted machine.
 
-{ pkgs, nixpkgs, nixramModule }:
+{ pkgs, nixpkgs, nixramModule, systemManagerModule, systemManagerLib }:
 
 let
   lib = pkgs.lib;
@@ -38,6 +38,7 @@ let
 
   cfg-4G = evalFor { services.nixram.level = "4G"; };
   cfg-256M = evalFor { services.nixram.level = "256M"; };
+  cfg-1G = evalFor { services.nixram.level = "1G"; };
   cfg-128G = evalFor { services.nixram.level = "128G"; };
   cfg-sizing-virtual = evalFor {
     services.nixram.level = "4G";
@@ -61,20 +62,34 @@ let
     services.nixram.level = "4G";
     services.nixram.zram.diskSizeOverride = "ram / 4";
   };
+  # Proves the mkDefault fix on "-.slice"/"user.slice" actually works: a
+  # host can override just ONE slice with a plain assignment (no
+  # lib.mkForce) while the other keeps nixram's own default -- exactly the
+  # pattern a real fleet host (e2-micro) needs to preserve its own
+  # incident-tuned oomd config (root slice at a custom percentage, user
+  # slice deliberately left unarmed) on top of nixram.
+  cfg-override-user-slice = evalFor {
+    services.nixram.level = "4G";
+    systemd.slices."user".sliceConfig = { };
+  };
 
   results = [
     # --- level-4G-defaults ------------------------------------------------
+    (check "level-4G-defaults/zram-generator-actually-enabled"
+      (cfg-4G.services.zram-generator.enable == true)
+      "got: ${builtins.toJSON cfg-4G.services.zram-generator.enable}: settings alone are inert -- upstream gates its whole config on this flag, see modules/zram.nix")
+
     (check "level-4G-defaults/zram0-settings"
       (cfg-4G.services.zram-generator.settings.zram0 == {
-        zram-size = "ram";
-        zram-resident-limit = "ram * 35 / 100";
-        compression-algorithm = "zstd zstd(level=12) (type=idle)";
+        zram-size = "ram * 75 / 100";
+        zram-resident-limit = "ram * 25 / 100";
+        compression-algorithm = "lz4 zstd(level=3) (type=idle)";
         swap-priority = 100;
       })
       "got: ${builtins.toJSON cfg-4G.services.zram-generator.settings.zram0}")
 
     (check "level-4G-defaults/sysctl-swappiness"
-      (cfg-4G.boot.kernel.sysctl."vm.swappiness" == 180)
+      (cfg-4G.boot.kernel.sysctl."vm.swappiness" == 10)
       "got: ${builtins.toJSON (cfg-4G.boot.kernel.sysctl."vm.swappiness" or null)}")
 
     (check "level-4G-defaults/sysctl-page-cluster"
@@ -92,6 +107,14 @@ let
     (check "level-4G-defaults/no-min-free-kbytes"
       (!(cfg-4G.boot.kernel.sysctl ? "vm.min_free_kbytes"))
       "vm.min_free_kbytes unexpectedly present: ${builtins.toJSON (cfg-4G.boot.kernel.sysctl."vm.min_free_kbytes" or null)}")
+
+    (check "level-4G-defaults/no-vfs-cache-pressure-on-reluctant-tier"
+      (!(cfg-4G.boot.kernel.sysctl ? "vm.vfs_cache_pressure"))
+      "vm.vfs_cache_pressure unexpectedly present on a reluctant tier: ${builtins.toJSON (cfg-4G.boot.kernel.sysctl."vm.vfs_cache_pressure" or null)}")
+
+    (check "level-4G-defaults/overcommit-memory-on-reluctant-tier"
+      (cfg-4G.boot.kernel.sysctl."vm.overcommit_memory" == 1)
+      "got: ${builtins.toJSON (cfg-4G.boot.kernel.sysctl."vm.overcommit_memory" or null)}")
 
     (check "level-4G-defaults/root-slice-pressure-limit"
       (cfg-4G.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
@@ -130,12 +153,24 @@ let
       "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-4G.systemd.timers)}")
 
     (check "level-4G-defaults/recompress-timer-oncalendar"
-      ((cfg-4G.systemd.timers.nixram-zram-recompress.timerConfig.OnCalendar or null) == "daily")
+      ((cfg-4G.systemd.timers.nixram-zram-recompress.timerConfig.OnCalendar or null) == "*:0/15")
       "got: ${builtins.toJSON (cfg-4G.systemd.timers.nixram-zram-recompress.timerConfig.OnCalendar or null)}")
 
+    (check "level-4G-defaults/swappiness-relief-enabled-on-reluctant-tier"
+      (cfg-4G.systemd.timers ? "nixram-swappiness-relief")
+      "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-4G.systemd.timers)}")
+
+    (check "level-4G-defaults/swappiness-relief-interval"
+      ((cfg-4G.systemd.timers.nixram-swappiness-relief.timerConfig.OnUnitActiveSec or null) == "30s")
+      "got: ${builtins.toJSON (cfg-4G.systemd.timers.nixram-swappiness-relief.timerConfig.OnUnitActiveSec or null)}")
+
+    (check "level-4G-defaults/swappiness-relief-service-exists"
+      (cfg-4G.systemd.services ? "nixram-swappiness-relief")
+      "systemd.services keys: ${builtins.toJSON (builtins.attrNames cfg-4G.systemd.services)}")
+
     # --- level-256M ---------------------------------------------------------
-    (check "level-256M/compression-algorithm-no-idle-tier"
-      (cfg-256M.services.zram-generator.settings.zram0.compression-algorithm == "zstd(level=1)")
+    (check "level-256M/compression-algorithm-zstd-alone"
+      (cfg-256M.services.zram-generator.settings.zram0.compression-algorithm == "zstd(level=3)")
       "got: ${builtins.toJSON cfg-256M.services.zram-generator.settings.zram0.compression-algorithm}")
 
     (check "level-256M/oomd-disabled"
@@ -146,28 +181,60 @@ let
       (cfg-256M.systemd.slices."-".sliceConfig == { })
       "got: ${builtins.toJSON cfg-256M.systemd.slices."-".sliceConfig}")
 
-    (check "level-256M/no-recompress-timer"
+    (check "level-256M/recompress-timer-absent"
       (!(cfg-256M.systemd.timers ? "nixram-zram-recompress"))
+      "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-256M.systemd.timers)}")
+
+    (check "level-256M/sysctl-swappiness-eager"
+      (cfg-256M.boot.kernel.sysctl."vm.swappiness" == 120)
+      "got: ${builtins.toJSON (cfg-256M.boot.kernel.sysctl."vm.swappiness" or null)}")
+
+    (check "level-256M/swappiness-relief-absent-on-dire-tier"
+      (!(cfg-256M.systemd.timers ? "nixram-swappiness-relief"))
       "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-256M.systemd.timers)}")
 
     (check "level-256M/watermark-scale-factor"
       (cfg-256M.boot.kernel.sysctl."vm.watermark_scale_factor" == 200)
       "got: ${builtins.toJSON (cfg-256M.boot.kernel.sysctl."vm.watermark_scale_factor" or null)}")
 
+    (check "level-256M/vfs-cache-pressure-on-dire-tier"
+      (cfg-256M.boot.kernel.sysctl."vm.vfs_cache_pressure" == 200)
+      "got: ${builtins.toJSON (cfg-256M.boot.kernel.sysctl."vm.vfs_cache_pressure" or null)}")
+
+    (check "level-256M/no-overcommit-memory-on-dire-tier"
+      (!(cfg-256M.boot.kernel.sysctl ? "vm.overcommit_memory"))
+      "vm.overcommit_memory unexpectedly present on a dire tier: ${builtins.toJSON (cfg-256M.boot.kernel.sysctl."vm.overcommit_memory" or null)}")
+
     (check "level-256M/sshd-still-protected"
       (cfg-256M.systemd.services.sshd.serviceConfig.OOMScoreAdjust == -900)
       "got: ${builtins.toJSON (cfg-256M.systemd.services.sshd.serviceConfig.OOMScoreAdjust or null)}")
 
-    # --- level-128G-no-resident-limit ---------------------------------------
-    (check "level-128G-no-resident-limit/no-resident-limit-attr"
-      (!(cfg-128G.services.zram-generator.settings.zram0 ? "zram-resident-limit"))
+    # --- level-1G --------------------------------------------------------
+    # Unified with 256M/512M's eager swappiness (rationale.md [3]) --
+    # compute-boundedness, not headroom, decides architecture (row 4), and
+    # 1G shares 256M/512M's "light usage, RAM-desperate" workload profile.
+    (check "level-1G/compression-algorithm-zstd-alone"
+      (cfg-1G.services.zram-generator.settings.zram0.compression-algorithm == "zstd(level=3)")
+      "got: ${builtins.toJSON cfg-1G.services.zram-generator.settings.zram0.compression-algorithm}")
+
+    (check "level-1G/sysctl-swappiness-eager"
+      (cfg-1G.boot.kernel.sysctl."vm.swappiness" == 120)
+      "got: ${builtins.toJSON (cfg-1G.boot.kernel.sysctl."vm.swappiness" or null)}")
+
+    (check "level-1G/recompress-timer-absent"
+      (!(cfg-1G.systemd.timers ? "nixram-zram-recompress"))
+      "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-1G.systemd.timers)}")
+
+    # --- level-128G-resident-limit -------------------------------------------
+    (check "level-128G-resident-limit/resident-limit-attr"
+      (cfg-128G.services.zram-generator.settings.zram0."zram-resident-limit" == "ram * 20 / 100")
       "zram0: ${builtins.toJSON cfg-128G.services.zram-generator.settings.zram0}")
 
-    (check "level-128G-no-resident-limit/zram-size"
-      (cfg-128G.services.zram-generator.settings.zram0.zram-size == "min(ram / 2, 16384)")
+    (check "level-128G-resident-limit/zram-size"
+      (cfg-128G.services.zram-generator.settings.zram0.zram-size == "ram * 75 / 100")
       "got: ${builtins.toJSON cfg-128G.services.zram-generator.settings.zram0.zram-size}")
 
-    (check "level-128G-no-resident-limit/watermark-scale-factor"
+    (check "level-128G-resident-limit/watermark-scale-factor"
       (cfg-128G.boot.kernel.sysctl."vm.watermark_scale_factor" == 100)
       "got: ${builtins.toJSON (cfg-128G.boot.kernel.sysctl."vm.watermark_scale_factor" or null)}")
 
@@ -190,19 +257,21 @@ let
       "zram0: ${builtins.toJSON cfg-sizing-physical.services.zram-generator.settings.zram0}")
 
     # --- mode-zswap ------------------------------------------------------
+    # Values here match elitebook's real production deployment, not the
+    # untested upstream/Pop!_OS defaults -- rationale.md [5], [10].
     (check "mode-zswap/kernel-params"
       (lib.all (p: lib.elem p cfg-mode-zswap.boot.kernelParams) [
         "zswap.enabled=1"
         "zswap.compressor=zstd"
         "zswap.zpool=zsmalloc"
-        "zswap.max_pool_percent=20"
+        "zswap.max_pool_percent=30"
         "zswap.accept_threshold_percent=90"
         "zswap.shrinker_enabled=1"
       ])
       "kernelParams: ${builtins.toJSON cfg-mode-zswap.boot.kernelParams}")
 
     (check "mode-zswap/sysctl-swappiness"
-      (cfg-mode-zswap.boot.kernel.sysctl."vm.swappiness" == 120)
+      (cfg-mode-zswap.boot.kernel.sysctl."vm.swappiness" == 25)
       "got: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.swappiness" or null)}")
 
     (check "mode-zswap/sysctl-page-cluster"
@@ -210,8 +279,32 @@ let
       "got: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.page-cluster" or null)}")
 
     (check "mode-zswap/sysctl-watermark-scale-factor"
-      (cfg-mode-zswap.boot.kernel.sysctl."vm.watermark_scale_factor" == 125)
+      (cfg-mode-zswap.boot.kernel.sysctl."vm.watermark_scale_factor" == 50)
       "got: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.watermark_scale_factor" or null)}")
+
+    (check "mode-zswap/sysctl-vfs-cache-pressure"
+      (cfg-mode-zswap.boot.kernel.sysctl."vm.vfs_cache_pressure" == 80)
+      "got: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.vfs_cache_pressure" or null)}")
+
+    (check "mode-zswap/sysctl-overcommit-memory"
+      (cfg-mode-zswap.boot.kernel.sysctl."vm.overcommit_memory" == 1)
+      "got: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.overcommit_memory" or null)}")
+
+    (check "mode-zswap/no-admin-reserve-kbytes"
+      (!(cfg-mode-zswap.boot.kernel.sysctl ? "vm.admin_reserve_kbytes"))
+      "vm.admin_reserve_kbytes unexpectedly present: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.admin_reserve_kbytes" or null)}")
+
+    (check "mode-zswap/no-user-reserve-kbytes"
+      (!(cfg-mode-zswap.boot.kernel.sysctl ? "vm.user_reserve_kbytes"))
+      "vm.user_reserve_kbytes unexpectedly present: ${builtins.toJSON (cfg-mode-zswap.boot.kernel.sysctl."vm.user_reserve_kbytes" or null)}")
+
+    (check "mode-zswap/oomd-pressure-duration"
+      (cfg-mode-zswap.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureDurationSec == "3s")
+      "got: ${builtins.toJSON (cfg-mode-zswap.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureDurationSec or null)}")
+
+    (check "mode-zswap/oomd-pressure-limit-unchanged"
+      (cfg-mode-zswap.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
+      "got: ${builtins.toJSON (cfg-mode-zswap.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
 
     (check "mode-zswap/no-zram0"
       (!(cfg-mode-zswap.services.zram-generator.settings ? "zram0"))
@@ -247,6 +340,14 @@ let
     (check "override-wins/disk-size-override"
       (cfg-override.services.zram-generator.settings.zram0.zram-size == "ram / 4")
       "got: ${builtins.toJSON cfg-override.services.zram-generator.settings.zram0.zram-size}")
+
+    (check "override-wins/user-slice-plain-override-no-mkforce-needed"
+      (cfg-override-user-slice.systemd.slices."user".sliceConfig == { })
+      "got: ${builtins.toJSON cfg-override-user-slice.systemd.slices."user".sliceConfig}")
+
+    (check "override-wins/root-slice-keeps-nixram-default-when-only-user-overridden"
+      (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
+      "got: ${builtins.toJSON (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;
@@ -272,4 +373,18 @@ else {
       echo "all $passedCount nixram eval tests passed"
       touch $out
     '';
+
+  # A REAL runtime test (ephemeral QEMU, nothing persists) -- eval-tests
+  # above only confirm config RENDERING; this is the one exercising actual
+  # kernel/systemd behavior. See checks/swappiness-relief-vm-test.nix.
+  swappiness-relief-vm-test = import ./swappiness-relief-vm-test.nix {
+    inherit pkgs nixpkgs nixramModule;
+  };
+
+  # Eval-time tests for the system-manager (non-NixOS) backend -- same
+  # rendering-only scope as eval-tests above, via system-manager's own real
+  # `lib.makeSystemConfig`. See system-manager/default.nix.
+  system-manager-eval-tests = import ./system-manager-eval-tests.nix {
+    inherit pkgs systemManagerModule systemManagerLib;
+  };
 }

@@ -180,7 +180,7 @@ NixOS configuration and commit it like any other hardware fact.
       </div>
       <div class="feature">
         <h3>A ladder from tiny VPS to big server</h3>
-        <p>Fourteen anchor sizes, from 256M to 128G. The shape genuinely changes along the way. The smallest tier spends less CPU on compression and accepts a worse ratio for it. The largest ones stop scaling the swap device with RAM and cap it instead.</p>
+        <p>Fourteen anchor sizes, from 256M to 128G. The shape genuinely changes along the way. The smallest tiers spend less CPU on compression and skip the recompression pass entirely. The largest ones cap the compressed pool at a fixed share of RAM instead of scaling it up unbounded.</p>
       </div>
       <div class="feature">
         <h3>Two limits, and the tight one is real</h3>
@@ -188,7 +188,7 @@ NixOS configuration and commit it like any other hardware fact.
       </div>
       <div class="feature">
         <h3>Honest about what is measured</h3>
-        <p>Every value carries one of three marks: cited from someone else's published work, our own reasoned extrapolation that nobody has measured yet, or the kernel's own default left deliberately alone. The extrapolations are tracked as open experiments.</p>
+        <p>Every value carries one of four marks: cited from someone else's published work, a figure stated directly from firsthand production experience, our own reasoned extrapolation that nobody has measured yet, or the kernel's own default left deliberately alone. The extrapolations are tracked as open experiments.</p>
       </div>
       <div class="feature">
         <h3>A watchdog that watches the right thing</h3>
@@ -225,14 +225,14 @@ NixOS configuration and commit it like any other hardware fact.
       <div class="explainer-card">
         <span class="kicker">On the way in</span>
         <h3>Compression is the toll booth</h3>
-        <p>A page is being reclaimed &mdash; the kernel is taking memory back from one thing to give it to another. zram compresses it right then using zstd, a fast general-purpose compression algorithm, in the kernel path, while the process that needed the memory waits.</p>
+        <p>A page is being reclaimed &mdash; the kernel is taking memory back from one thing to give it to another. zram compresses it right then using lz4, a fast compression algorithm, in the kernel path, while the process that needed the memory waits.</p>
         <p>It is on the critical path, under pressure. That is why the default is a fast setting.</p>
       </div>
       <div class="explainer-card">
         <span class="kicker">Later, while nothing waits</span>
         <h3>Recompression is the night shift</h3>
-        <p>Newer kernels let you name a second, slower setting. Later, on a schedule, the machine walks over pages nothing has touched: unpack them, repack them denser, keep whichever version came out smaller.</p>
-        <p>Nothing is waiting on it. The kernel never starts this by itself, so nixram ships a systemd timer that does, once a day by default.</p>
+        <p>Newer kernels let you name a second, slower setting. Later, while the box is idle, the machine walks over pages nothing has touched: unpack them, repack them denser, keep whichever version came out smaller.</p>
+        <p>Nothing is waiting on it. The kernel never starts this by itself, so nixram ships a systemd timer that checks in every 15 minutes and only does the work once the CPU is actually idle &mdash; a busy box just waits for the next check.</p>
       </div>
     </div>
 
@@ -243,9 +243,10 @@ NixOS configuration and commit it like any other hardware fact.
 
     <div class="note">
       <p>Swap traffic is asymmetric in exactly the way that makes this pay. Writes are urgent and reads are urgent, but the storage in between is long-lived, and most swapped pages are never read back at all.</p>
-      <p><strong>The honest caveat.</strong> Pages are only 4 KiB, too small for the long-range tricks that make big files shrink dramatically. So the extra saving is modest, and it is an open question rather than a result. The second, slower setting defaults to zstd compression strength 12.</p>
+      <p><strong>The honest caveat.</strong> Pages are only 4 KiB, too small for the long-range tricks that make big files shrink dramatically. So the extra saving is modest, and it is an open question rather than a result. The second, slower setting defaults to zstd compression strength 3.</p>
       <p><strong>Requirements.</strong> Recompression needs Linux 6.2 or newer, built with zram's multi-tier compression support. On an older kernel the timer logs one explanatory line and exits cleanly. It does not fail your rebuild or your boot.</p>
       <p>The line to leave with: compression happens on the way in and has to be fast. Recompression happens later while the box is idle and can afford to be slow, because unpacking costs the same either way.</p>
+      <p><strong>Not every tier gets a second act.</strong> The three smallest &mdash; 256M, 512M, 1G &mdash; run zstd alone as the primary compressor and skip recompression entirely: everything up to a gigabyte goes to zstd and is done. Every tier from 2G up runs the two-step dance instead: a fast lz4 primary now, a denser zstd recompression pass later, gated on the CPU actually being idle. See <a href="/docs#tiers">why each tier is shaped this way</a>.</p>
     </div>
   </div>
 </section>
@@ -257,10 +258,10 @@ NixOS configuration and commit it like any other hardware fact.
       <p>One idea carries the whole design. zram is given two separate limits that do two different jobs.</p>
     </div>
 
-    <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine at level 4G, the ceiling (the zram-size setting) is 4 GiB and bounds how much compressed data the device may hold. The budget (the zram-resident-limit setting) is 35 percent of RAM, or 1.4 GiB, and bounds how much real RAM the compressed pool may occupy. Whichever limit is reached first is the one that stops you."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
+    <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine at level 4G, the ceiling (the zram-size setting) is 75 percent of RAM, or 3 GiB, and bounds how much compressed data the device may hold. The budget (the zram-resident-limit setting) is 25 percent of RAM, or 1 GiB, and bounds how much real RAM the compressed pool may occupy. Whichever limit is reached first is the one that stops you."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
 
   ┌───────────────────────────────────────────────────────────┐
-  │  CEILING     zram-size = ram                    4 GiB     │
+  │  CEILING     zram-size = 75% of RAM             3 GiB     │
   │                                                           │
   │  How much compressed data the device may hold.            │
   │  A number only. No disk, no file, no partition.           │
@@ -269,7 +270,7 @@ NixOS configuration and commit it like any other hardware fact.
                         │  all of it actually living in
                         ▼
   ┌───────────────────────────────────────────────────────────┐
-  │  BUDGET      zram-resident-limit = 35% of RAM   1.4 GiB   │
+  │  BUDGET      zram-resident-limit = 25% of RAM     1 GiB   │
   │                                                           │
   │  How much real RAM the compressed pool may occupy.        │
   │  Enforced by the kernel. This is the real protection.     │
@@ -318,30 +319,25 @@ NixOS configuration and commit it like any other hardware fact.
         <tbody>
           <tr>
             <th scope="row">256M &ndash; 1G</th>
-            <td>twice RAM</td>
-            <td>half of RAM</td>
-          </tr>
-          <tr>
-            <th scope="row">2G &ndash; 8G</th>
             <td>all of RAM</td>
-            <td>35% of RAM</td>
+            <td>30% of RAM</td>
           </tr>
           <tr>
-            <th scope="row">10G &ndash; 32G</th>
-            <td>half of RAM, capped at 16 GiB</td>
-            <td>35% of RAM</td>
+            <th scope="row">2G &ndash; 16G</th>
+            <td>75% of RAM</td>
+            <td>25% of RAM</td>
           </tr>
           <tr>
-            <th scope="row">64G &ndash; 128G</th>
-            <td>16 GiB flat</td>
-            <td>deliberately unset &mdash; at those sizes the ceiling alone is already 25% of RAM or less</td>
+            <th scope="row">24G &ndash; 128G</th>
+            <td>75% of RAM</td>
+            <td>20% of RAM</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div class="note">
-      <p><strong>One documented exception to rounding up.</strong> Any machine above 32 GiB and up to 64 GiB rounds into the 64G level, which drops the real cap. A 33 GiB machine there gets a 16 GiB ceiling and no budget behind it. If you want the 35% budget kept, set it explicitly.</p>
+      <p>Swappiness follows the same shape, at a coarser split: 120 (eager &mdash; lean into zram right away) at 256M&ndash;1G, versus 10 at rest from 2G up, backed by a pressure-gated relief valve that raises it to 60 for as long as the box is genuinely under sustained memory pressure and lowers it back to 10 once that pressure actually resolves.</p>
       <p>Each tier also carries its own compression setting, reclaim tuning and watchdog state. <a href="/docs">The full table, and the reasoning for every tier, is in the docs</a>.</p>
     </div>
   </div>

@@ -35,9 +35,22 @@
 # `enableSystemSlice` / `enableUserSlices` helpers: they hardcode an 80%
 # pressure limit with no duration control, which doesn't let nixram
 # express its own per-level PSI values. We set the same two slices
-# ourselves instead, with our own numbers.
+# ourselves instead, with our own numbers. (That 80% figure also isn't
+# a real systemd-oomd/Fedora number under any name we could find --
+# nixram's flat 60%/30s is the actual compiled-in upstream default; see
+# docs/rationale.md [10].)
+#
+# PRESSURE DIAGNOSTICS: a second, independent unit below (gated on
+# `oomd.pressureDiagnostics.enable`, on by default only for
+# `mode = "zswap"`) periodically logs `memory.pressure` AND
+# `io.pressure` together. Purely diagnostic -- see docs/rationale.md
+# [10] and [14] for why zram doesn't need this (no disk in its path,
+# `io.pressure` would be uninformative) and zswap does (a
+# disk-fallthrough miss shows up in both signals at once, so seeing
+# them together after the fact tells you whether a given pressure
+# episode was CPU-bound or disk-bound).
 
-{ lib, config, ... }:
+{ lib, config, pkgs, ... }:
 
 with lib;
 
@@ -50,10 +63,23 @@ let
   activeLevelName = if cfg.level != null then cfg.level else builtins.head levelNames;
   activeLevel = levels.${activeLevelName};
 
+  # directed -- Julian: "for the elitebook at least adapt to what it has
+  # now." zswap's real deployment cut the duration to 3s (from the 30s
+  # shared default) system-wide, specifically to react faster under a
+  # bursty compute (LLM-load) workload -- this is the one place nixram's
+  # "zram/zswap share the number" stance (rationale.md [10]) turned out
+  # not to hold up against the real fleet data point it's supposed to be
+  # grounded in. The limit percentage (60%) is unchanged; only the
+  # duration was shortened. Flagged as possibly workload-specific rather
+  # than a general zswap-laptop fact (the real config ties it to a
+  # heavy-compute use case) -- adapted here rather than left unverified.
+  zswapOomdPressureDurationSec = 3;
+
   pressureSliceConfig = {
     ManagedOOMMemoryPressure = "kill";
     ManagedOOMMemoryPressureLimit = "${toString activeLevel.oomd.pressureLimitPercent}%";
-    ManagedOOMMemoryPressureDurationSec = "${toString activeLevel.oomd.pressureDurationSec}s";
+    ManagedOOMMemoryPressureDurationSec =
+      "${toString (if cfg.mode == "zswap" then zswapOomdPressureDurationSec else activeLevel.oomd.pressureDurationSec)}s";
   };
 
   # One serviceConfig per protected unit, merging both protection
@@ -70,14 +96,53 @@ let
   protectedUnitEntry = unit: {
     name = removeSuffix ".service" unit;
     value.serviceConfig = {
-      OOMScoreAdjust = -900;
-      ManagedOOMPreference = "omit";
+      OOMScoreAdjust = mkDefault (-900);
+      ManagedOOMPreference = mkDefault "omit";
     };
   };
+
+  # Diagnostic only -- reads two /proc/pressure files and logs one line.
+  # Guarded the same way recompression's kernel-support check in
+  # modules/zram.nix is: skip silently (with a log line) rather than
+  # fail, since PSI (CONFIG_PSI, or `psi=0` on the kernel command line)
+  # isn't guaranteed present everywhere nixram runs.
+  pressureDiagnosticsScript = pkgs.writeShellScript "nixram-pressure-diagnostics" ''
+    set -euo pipefail
+
+    if [ ! -e /proc/pressure/memory ] || [ ! -e /proc/pressure/io ]; then
+      echo "nixram: /proc/pressure/{memory,io} not present (kernel lacks PSI, CONFIG_PSI=n, or psi=0 on the command line) -- skipping pressure diagnostics this run" >&2
+      exit 0
+    fi
+
+    mem_full=$(awk '/^full / {print; exit}' /proc/pressure/memory)
+    io_full=$(awk '/^full / {print; exit}' /proc/pressure/io)
+
+    echo "nixram pressure snapshot: memory $mem_full | io $io_full"
+  '';
 in
 {
   config = mkIf cfg.enable {
-    systemd.services = listToAttrs (map protectedUnitEntry cfg.oomd.protectedUnits);
+    # `//`-merged, not two separate `systemd.services.*` attribute paths --
+    # Nix's own attrset-literal rule rejects defining `systemd.services`
+    # both directly (a set) and via a dotted sub-path in the same literal
+    # ("attribute already defined"), independent of NixOS module merging.
+    systemd.services = listToAttrs (map protectedUnitEntry cfg.oomd.protectedUnits) // {
+      nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
+        description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";
+        # Explicit PATH dependency for `awk` -- same missing-dependency
+        # bug found by the runtime VM test on the zram-side PSI scripts
+        # (modules/zram.nix); a systemd service's default PATH is not
+        # guaranteed to include it otherwise.
+        path = [ pkgs.gawk ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pressureDiagnosticsScript}";
+          Nice = 19;
+          CPUWeight = 10;
+          IOSchedulingClass = "idle";
+        };
+      };
+    };
 
     # When the oomd layer is off (the 256M default), actively default
     # the daemon itself off too -- nixpkgs ships systemd-oomd enabled by
@@ -86,7 +151,27 @@ in
     # both ways: a host config can still force either direction.
     systemd.oomd.enable = mkDefault cfg.oomd.enable;
 
-    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
-    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
+    # mkDefault on the CONTENTS, not just the mkIf gate: a host needs to be
+    # able to override "-.slice" and "user.slice" INDEPENDENTLY (e.g. arm
+    # the root slice at a different percentage than the level default while
+    # leaving user.slice alone entirely) with a plain assignment, the same
+    # "escape hatch on every layer, no mkForce needed" promise
+    # modules/sysctls.nix already keeps. Before this, a host's own plain
+    # `systemd.slices."user".sliceConfig = {};` would have collided with
+    # this module's own definition instead of winning -- found adversarially
+    # while working out how a real fleet host (e2-micro) could preserve its
+    # own incident-tuned oomd config (root slice at 80%, user slice
+    # deliberately left unarmed) on top of nixram.
+    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+
+    systemd.timers.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
+      description = "Timer for nixram PSI pressure diagnostic snapshot";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = cfg.oomd.pressureDiagnostics.onCalendar;
+        Persistent = true;
+      };
+    };
   };
 }

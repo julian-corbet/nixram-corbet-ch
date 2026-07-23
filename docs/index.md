@@ -36,13 +36,24 @@ Two distinct audiences, one module:
   [faq.md](faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere)
   for why the latter is actively misleading under nixram's own sizing model.
 - **An honesty taxonomy, not a wall of opinions.** Every value is tagged
-  sourced (●), extrapolated (◐), or kernel default (○). Extrapolated values
-  are reasoned, not measured, and said so out loud — see
-  [rationale.md](rationale.md).
+  sourced (●), directed (◆), extrapolated (◐), or kernel default (○).
+  Directed means a literal value Julian himself stated, applied as-is —
+  not Claude's inference. Extrapolated values are reasoned, not measured,
+  and said so out loud — see [rationale.md](rationale.md).
+- **A relief valve for genuine pressure, not a static number.** The
+  reluctant tiers (2G-128G) hold `vm.swappiness` low (10) at rest, but a
+  PSI-gated `nixram-swappiness-relief` timer watches
+  `/proc/pressure/memory` and temporarily raises it to 60 while memory
+  pressure is genuinely, sustainedly elevated — then lowers it back to 10
+  once the pressure has actually resolved, using a slower signal on the
+  way down so a brief lull doesn't bounce it back early. See
+  [rationale.md \[17\]](rationale.md#17-reluctant-tier-swappiness-10-at-rest-psi-gated-relief-valve-for-genuine-overflow).
 - **An escape hatch on every layer.** Every computed value — disksize,
-  resident limit, priority, recompression algorithm, oomd, sysctls,
-  min_free_kbytes — has an override option. Nothing here is load-bearing in
-  a way you can't turn off.
+  resident limit, priority, primary and recompression algorithm, the
+  swappiness-relief valve, oomd, sysctls, min_free_kbytes — has an
+  override option (`zram.compressionAlgorithmOverride`,
+  `zram.swappinessRelief.enable` and friends, among others). Nothing here
+  is load-bearing in a way you can't turn off.
 
 ## Quickstart
 

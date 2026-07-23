@@ -144,6 +144,28 @@ in
       description = "Escape hatch: override the level's idle-recompression algorithm spec (e.g. \"zstd(level=12)\").";
     };
 
+    zram.compressionAlgorithmOverride = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = ''
+        Escape hatch: override the level's primary (synchronous, write-path)
+        compression algorithm. Level defaults: `zstd(level=3)` with no
+        recompression at all at 256M/512M/1G (Julian's own instruction:
+        "everything up to a GB goes to zstd primary and done"); `lz4`
+        paired with `zstd(level=3)` recompression from 2G up -- see
+        docs/rationale.md [9] for why the split falls at the 1G/2G
+        boundary (workload compute-boundedness, not headroom).
+
+        Escape hatches here should be rare: the policy above already
+        encodes the reasoning that used to live only in a per-box override
+        (an earlier version of this design tried to solve very-CPU-weak
+        boxes as an override case; that reasoning is now the 256M/512M/1G
+        default instead). Use this only for a genuinely unusual box the
+        level-based policy doesn't fit -- state the outcome you want
+        directly, same as every other zram override.
+      '';
+    };
+
     zram.recompressionTimer.enable = mkOption {
       type = types.bool;
       default = activeLevel.zram.recompressionTimerEnableByDefault;
@@ -161,20 +183,96 @@ in
 
     zram.recompressionTimer.onCalendar = mkOption {
       type = types.str;
-      default = "daily";
+      default = "*:0/15";
       description = ''
-        systemd OnCalendar= expression for the recompression timer.
-        Default ("daily") is an UNVALIDATED STARTING POINT, not a
-        measured cadence -- see experiments/README.md (002) and
-        docs/rationale.md. Tune freely; there is no sourced "right"
-        answer yet.
+        systemd OnCalendar= expression for how often the recompression
+        timer CHECKS whether to act -- not how often it actually
+        recompresses. Cadence is idle-gated (Julian's explicit policy:
+        "whenever there is idle time", not a fixed schedule): every firing
+        reads CPU PSI first and does nothing unless the box is genuinely
+        quiet right now, so a busy box simply defers to its next idle
+        window instead of being forced to run regardless of load, while a
+        box with frequent idle windows gets more chances to mark and
+        recompress, not fewer. Default (every 15 minutes) is an
+        UNVALIDATED STARTING POINT for the check frequency itself -- see
+        experiments/README.md (002) and docs/rationale.md [11]. Tune
+        freely; there is no sourced "right" answer yet.
+      '';
+    };
+
+    zram.swappinessRelief.enable = mkOption {
+      type = types.bool;
+      default = activeLevel.swappinessReliefEnableByDefault;
+      description = ''
+        Ships a systemd timer that watches memory PSI and temporarily
+        raises `vm.swappiness` above the level's low reluctant baseline
+        during genuine, sustained memory pressure -- then lowers it back
+        once the pressure has genuinely passed. Julian's own design
+        intent: "swap is for overflow when upgrades run or whatever, or
+        for icecold pages" -- a low static swappiness serves that on its
+        own most of the time, but a real overflow event (a deploy spike,
+        a burst of legitimate load) still needs the kernel able to lean
+        on swap when it genuinely has to. On by default only on
+        RELUCTANT tiers (2G-128G); dire tiers are already eager by design
+        and have no low baseline to relieve from. See docs/rationale.md
+        [17].
+      '';
+    };
+
+    zram.swappinessRelief.reliefValue = mkOption {
+      type = types.ints.between 0 200;
+      default = 60;
+      description = ''
+        `vm.swappiness` value applied while genuine memory pressure is
+        detected (see `pressureHighThreshold`). Defaults to 60 -- the
+        plain kernel default, and this project's own former reluctant-
+        tier baseline -- as a deliberate anchor: under real pressure, the
+        box behaves like an ordinary, un-tuned system would, rather than
+        the unusually low value it holds at rest.
+      '';
+    };
+
+    zram.swappinessRelief.pressureHighThreshold = mkOption {
+      type = types.ints.between 1 100;
+      default = 10;
+      description = ''
+        Memory PSI "some" line's avg10 (percent), read every
+        `checkIntervalSec`. At or above this, the box enters relief mode
+        (swappiness -> `reliefValue`) on the next check. 10 mirrors the
+        CPU-PSI idle-gate threshold already used for recompression
+        (docs/rationale.md [11]) -- the same number, the opposite
+        direction, on a different pressure file.
+      '';
+    };
+
+    zram.swappinessRelief.pressureLowThreshold = mkOption {
+      type = types.ints.between 0 100;
+      default = 1;
+      description = ''
+        Memory PSI "some" line's avg60 (percent). Once already in relief
+        mode, the box only returns to the low baseline once avg60 drops
+        below this -- deliberately the SLOWER-moving 60-second average,
+        not avg10, so a brief lull right after a spike doesn't bounce
+        swappiness back down before the pressure has actually resolved.
+      '';
+    };
+
+    zram.swappinessRelief.checkIntervalSec = mkOption {
+      type = types.ints.positive;
+      default = 30;
+      description = ''
+        How often the relief-valve timer checks memory PSI. Pressure can
+        build far faster than the 15-minute cadence used for the
+        (CPU-idle, not urgency-driven) recompression timer -- this needs
+        to react within seconds of real pressure appearing, not wait for
+        a slow poll. Unvalidated starting point; tune freely.
       '';
     };
 
     zswap.maxPoolPercent = mkOption {
       type = types.ints.between 1 100;
-      default = 20;
-      description = "Percent of total RAM the compressed zswap pool may occupy. 20 is the verified upstream kernel default -- deliberately not raised, unlike zram's disksize: the zswap pool competes with the SAME RAM as running applications, not with disk I/O, so a bigger pool has a real opportunity cost here.";
+      default = 30;
+      description = "Percent of total RAM the compressed zswap pool may occupy. The kernel's own upstream default is 20, deliberately not raised on the reasoning that the zswap pool competes with the SAME RAM as running applications, not disk I/O, so a bigger pool has a real opportunity cost -- but this project's own real zswap box (elitebook) runs 30 in production (raised from 25), treating the pool as a hot cache that should churn on bursty activity rather than a conservative reservation. Directed: adapted to match the real deployment rather than the untested upstream default.";
     };
 
     zswap.acceptThresholdPercent = mkOption {
@@ -199,6 +297,29 @@ in
       type = types.bool;
       default = activeLevel.oomd.enable;
       description = "Arm systemd-oomd with PSI-based thresholds from the active level. Off only at the 256M level by default (unmeasured tradeoff, not a sourced number -- see docs/rationale.md [8]); override freely either direction.";
+    };
+
+    oomd.pressureDiagnostics.enable = mkOption {
+      type = types.bool;
+      default = cfg.mode == "zswap";
+      description = ''
+        Log a periodic PSI snapshot -- both `memory.pressure` and
+        `io.pressure`, "full" lines -- to the journal. Diagnostic only,
+        never wired into any kill decision (systemd-oomd has no way to
+        AND two pressure signals together). Exists because an identical
+        `memory.pressure` reading means different real severity
+        depending on swap backend: zswap misses fall through to a real,
+        possibly slow disk, so `io.pressure` rises right alongside it;
+        zram never touches a disk at all, so `io.pressure` would tell
+        you nothing zram-specific. See docs/rationale.md [10] and [14].
+        Defaults on only for `mode = "zswap"`.
+      '';
+    };
+
+    oomd.pressureDiagnostics.onCalendar = mkOption {
+      type = types.str;
+      default = "minutely";
+      description = "systemd OnCalendar= expression for the pressure-diagnostics timer. Diagnostic logging only -- a coarse interval is fine; tune freely.";
     };
 
     oomd.protectedUnits = mkOption {
