@@ -118,7 +118,7 @@ system-manager's smaller, real option surface instead of NixOS's:
 - The `vm.*` sysctls (swappiness, watermarks, page-cluster, `vfs_cache_pressure`,
   `overcommit_memory` — the last two directed from elitebook's real
   production config, see [docs/rationale.md](docs/rationale.md#vfs_cache_pressure-80))
-  are applied via a plain `/etc/sysctl.d/60-nixram.conf` file plus a
+  are applied via a plain `/etc/sysctl.d/90-nixram.conf` file plus a
   re-apply bridge unit, since system-manager has no `boot.kernel.sysctl`
   abstraction — same real effect, different mechanism.
 - systemd-oomd's PSI slice configuration ports over almost unchanged

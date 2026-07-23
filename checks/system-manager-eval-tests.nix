@@ -51,37 +51,47 @@ let
 
   results = [
     # --- level-24G-defaults (mode = zswap) --------------------------------
+    (check "sm-24G/sysctl-file-sorts-after-distro-defaults"
+      # Regression guard: CachyOS ships its own conflicting sysctl values in
+      # /usr/lib/sysctl.d/70-cachyos-settings.conf (confirmed live on
+      # elitebook) -- systemd-sysctl's last-file-wins ordering means
+      # anything sorting before "70" would be silently overridden. "90" is
+      # not a magic number to preserve for its own sake; the REAL
+      # requirement is "later than 70".
+      (cfg-24G.environment.etc ? "sysctl.d/90-nixram.conf")
+      "environment.etc keys: ${builtins.toJSON (builtins.attrNames cfg-24G.environment.etc)}")
+
     (check "sm-24G/sysctl-file-replaceExisting"
-      (cfg-24G.environment.etc."sysctl.d/60-nixram.conf".replaceExisting == true)
-      "got: ${builtins.toJSON (cfg-24G.environment.etc."sysctl.d/60-nixram.conf".replaceExisting or null)}")
+      (cfg-24G.environment.etc."sysctl.d/90-nixram.conf".replaceExisting == true)
+      "got: ${builtins.toJSON (cfg-24G.environment.etc."sysctl.d/90-nixram.conf".replaceExisting or null)}")
 
     (check "sm-24G/sysctl-file-contains-swappiness"
-      (lib.hasInfix "vm.swappiness = 25" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.swappiness = 25" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-contains-watermark"
-      (lib.hasInfix "vm.watermark_scale_factor = 50" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.watermark_scale_factor = 50" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-contains-page-cluster"
-      (lib.hasInfix "vm.page-cluster = 2" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.page-cluster = 2" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-contains-vfs-cache-pressure"
-      (lib.hasInfix "vm.vfs_cache_pressure = 80" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.vfs_cache_pressure = 80" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-contains-overcommit-memory"
-      (lib.hasInfix "vm.overcommit_memory = 1" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.overcommit_memory = 1" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-no-admin-reserve-kbytes"
-      (!(lib.hasInfix "admin_reserve_kbytes" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text))
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (!(lib.hasInfix "admin_reserve_kbytes" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text))
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-file-no-user-reserve-kbytes"
-      (!(lib.hasInfix "user_reserve_kbytes" cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text))
-      "text: ${cfg-24G.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (!(lib.hasInfix "user_reserve_kbytes" cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text))
+      "text: ${cfg-24G.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-24G/sysctl-reapply-bridge-exists"
       (cfg-24G.systemd.services ? "nixram-sysctl-reapply")
@@ -140,16 +150,16 @@ let
       "got enable: ${builtins.toJSON (cfg-mode-none.system-manager.preActivationAssertions.nixram-zswap-active.enable or null)}")
 
     (check "sm-mode-none/no-swappiness-in-sysctl-file"
-      (!(lib.hasInfix "vm.swappiness" cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text))
-      "text: ${cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (!(lib.hasInfix "vm.swappiness" cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text))
+      "text: ${cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-mode-none/no-vfs-cache-pressure-in-sysctl-file"
-      (!(lib.hasInfix "vfs_cache_pressure" cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text))
-      "text: ${cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (!(lib.hasInfix "vfs_cache_pressure" cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text))
+      "text: ${cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-mode-none/no-overcommit-memory-in-sysctl-file"
-      (!(lib.hasInfix "overcommit_memory" cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text))
-      "text: ${cfg-mode-none.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (!(lib.hasInfix "overcommit_memory" cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text))
+      "text: ${cfg-mode-none.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     # --- override-wins -----------------------------------------------------
     (check "sm-override-wins/max-pool-percent-in-preactivation-script"
@@ -167,8 +177,8 @@ let
       "got: ${builtins.toJSON cfg-oomd-disabled.systemd.slices."user".sliceConfig}")
 
     (check "sm-oomd-disabled/sysctls-still-applied"
-      (lib.hasInfix "vm.swappiness = 25" cfg-oomd-disabled.environment.etc."sysctl.d/60-nixram.conf".text)
-      "text: ${cfg-oomd-disabled.environment.etc."sysctl.d/60-nixram.conf".text}")
+      (lib.hasInfix "vm.swappiness = 25" cfg-oomd-disabled.environment.etc."sysctl.d/90-nixram.conf".text)
+      "text: ${cfg-oomd-disabled.environment.etc."sysctl.d/90-nixram.conf".text}")
 
     (check "sm-oomd-disabled/protected-units-still-applied"
       (cfg-oomd-disabled.environment.etc ? "systemd/system/sshd.service.d/nixram-oom-protect.conf")
