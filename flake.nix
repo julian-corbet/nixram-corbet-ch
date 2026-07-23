@@ -2,8 +2,10 @@
   description = "Coherent memory-pressure tuning (zram/zswap + PSI-armed systemd-oomd + sysctls) for a given RAM level, as one small NixOS module.";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.system-manager.url = "github:numtide/system-manager";
+  inputs.system-manager.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, system-manager }:
     let
       lib = nixpkgs.lib;
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -65,6 +67,13 @@
       nixosModules.nixram = import ./modules/default.nix;
       nixosModules.default = self.nixosModules.nixram;
 
+      # For non-NixOS hosts (CachyOS et al.) applying config via
+      # numtide/system-manager instead of a real NixOS rebuild -- see
+      # system-manager/default.nix for what this backend can and can't do
+      # relative to the NixOS module above.
+      systemManagerModules.nixram = import ./system-manager/default.nix;
+      systemManagerModules.default = self.systemManagerModules.nixram;
+
       apps = forAllSystems (system: {
         detect-level = {
           type = "app";
@@ -77,6 +86,8 @@
           pkgs = pkgsFor system;
           inherit nixpkgs;
           nixramModule = self.nixosModules.nixram;
+          systemManagerModule = self.systemManagerModules.nixram;
+          systemManagerLib = system-manager.lib;
         }
       );
     };
