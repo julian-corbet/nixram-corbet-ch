@@ -9,8 +9,8 @@
 #
 #   - Toggling the systemd-oomd DAEMON itself (`systemd.oomd.enable` in the
 #     NixOS module) -- no such option exists here. Assumed already running
-#     via the distro's own defaults; this only configures the PSI thresholds
-#     the daemon reads once armed.
+#     via the distro's own defaults. `oomd.enable` here (default.nix) only
+#     gates whether nixram ARMS the slice config below, not the daemon.
 #   - `oomd.protectedUnits` -- system-manager cannot merge options into a
 #     FOREIGN unit's serviceConfig (sshd.service is pacman-owned here, not
 #     declared by this config at all), so the same net effect
@@ -81,10 +81,14 @@ let
 in
 {
   config = mkIf cfg.enable {
+    # Unconditional on oomd.enable, same as the NixOS module: OOMScoreAdjust
+    # is the kernel-fallback layer, meaningful even with the slice config
+    # below turned off (e.g. while adopting nixram's sysctls on a host that
+    # keeps its own existing, differently-shaped oomd setup for round one).
     environment.etc = listToAttrs (map protectedUnitEtcEntry cfg.oomd.protectedUnits);
 
-    systemd.slices."-".sliceConfig = pressureSliceConfig;
-    systemd.slices."user".sliceConfig = pressureSliceConfig;
+    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
+    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

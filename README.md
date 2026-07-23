@@ -125,6 +125,11 @@ system-manager's smaller, real option surface instead of NixOS's:
   (`systemd.slices` renders through the identical code NixOS itself uses);
   toggling whether the `systemd-oomd` **daemon** runs at all isn't
   manageable here, and is assumed already on via the distro's own defaults.
+  `services.nixram.oomd.enable = false` skips just the slice-arming step
+  (protected-unit `OOMScoreAdjust` still applies) — the intended way to
+  adopt nixram's sysctls on a host that already has its own, differently-
+  shaped oomd setup (per-app slices, a different root-slice threshold)
+  without nixram's generic config landing on top of it.
 - **Zswap's kernel-module parameters (`zswap.enabled`, `max_pool_percent`,
   `shrinker_enabled`) are set via the kernel command line, which
   system-manager categorically cannot touch** (it never manages the

@@ -129,6 +129,23 @@ in
     };
 
     oomd = {
+      enable = mkOption {
+        type = types.bool;
+        default = activeLevel.oomd.enable;
+        description = ''
+          Same intent as the NixOS module's `oomd.enable`, with one real
+          difference stated plainly: this only gates whether nixram ARMS
+          the PSI slice config and protected-unit drop-ins here -- it
+          cannot toggle whether the `systemd-oomd` daemon itself runs
+          (system-manager has no such option; see the file header).
+          Setting this to `false` is also the intended way to adopt
+          nixram's sysctl layer on a host with its own existing,
+          hand-tuned oomd setup (differently-shaped root/user slice
+          thresholds, per-app sacrificial slices, etc.) without nixram's
+          own generic slice config landing on top of it on day one.
+        '';
+      };
+
       pressureLimitPercent = mkOption {
         type = types.ints.between 1 100;
         default = activeLevel.oomd.pressureLimitPercent;

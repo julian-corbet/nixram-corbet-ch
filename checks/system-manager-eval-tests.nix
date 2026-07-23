@@ -42,6 +42,12 @@ let
     services.nixram.level = "24G";
     services.nixram.zswap.maxPoolPercent = 40;
   };
+  # A host adopting nixram's sysctls while keeping its OWN existing,
+  # differently-shaped oomd setup for now (e.g. elitebook's first rollout).
+  cfg-oomd-disabled = evalFor {
+    services.nixram.level = "24G";
+    services.nixram.oomd.enable = false;
+  };
 
   results = [
     # --- level-24G-defaults (mode = zswap) --------------------------------
@@ -150,6 +156,23 @@ let
       (lib.hasInfix "max_pool_percent 40"
         cfg-override-max-pool.system-manager.preActivationAssertions.nixram-zswap-active.script)
       "script: ${cfg-override-max-pool.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    # --- oomd.enable = false (adopt sysctls, keep an existing oomd setup) ---
+    (check "sm-oomd-disabled/no-root-slice-config"
+      (cfg-oomd-disabled.systemd.slices."-".sliceConfig == { })
+      "got: ${builtins.toJSON cfg-oomd-disabled.systemd.slices."-".sliceConfig}")
+
+    (check "sm-oomd-disabled/no-user-slice-config"
+      (cfg-oomd-disabled.systemd.slices."user".sliceConfig == { })
+      "got: ${builtins.toJSON cfg-oomd-disabled.systemd.slices."user".sliceConfig}")
+
+    (check "sm-oomd-disabled/sysctls-still-applied"
+      (lib.hasInfix "vm.swappiness = 25" cfg-oomd-disabled.environment.etc."sysctl.d/60-nixram.conf".text)
+      "text: ${cfg-oomd-disabled.environment.etc."sysctl.d/60-nixram.conf".text}")
+
+    (check "sm-oomd-disabled/protected-units-still-applied"
+      (cfg-oomd-disabled.environment.etc ? "systemd/system/sshd.service.d/nixram-oom-protect.conf")
+      "environment.etc keys: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled.environment.etc)}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;
