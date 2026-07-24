@@ -11,11 +11,13 @@
 
 let
   lib = pkgs.lib;
+  levelsData = import ../levels.nix;
 
   # Evaluate nixram (always enabled) plus whatever `extraConfig` a test
   # needs, against a minimal-but-complete NixOS configuration. Only the
   # specific attributes each test inspects get forced below -- never
-  # `config.system.build.toplevel`.
+  # `config.system.build.toplevel`, EXCEPT in `evalFailsBuild`, which
+  # exists specifically to force it.
   evalFor = extraConfig:
     (import (nixpkgs + "/nixos/lib/eval-config.nix") {
       system = "x86_64-linux";
@@ -30,6 +32,15 @@ let
         }
       ];
     }).config;
+
+  # `system.build.toplevel` is where NixOS's real assertion enforcement
+  # lives (`lib.asserts.checkAssertWarn` wraps it: `if <any assertion
+  # failed> then throw ... else <the real derivation>`) -- reading
+  # `config.assertions` itself never throws, it's a passive list. `seq`
+  # (shallow, WHNF only) is enough to hit that top-level `if`/`throw`
+  # without deep-forcing the entire system closure the way `deepSeq` would.
+  evalFailsBuild = extraConfig:
+    !(builtins.tryEval (builtins.seq (evalFor extraConfig).system.build.toplevel true)).success;
 
   # One test result. `detail` is only read when `ok == false` (in the
   # failure report below), but it's always a plain string here so
@@ -72,6 +83,116 @@ let
     services.nixram.level = "4G";
     systemd.slices."user".sliceConfig = { };
   };
+
+  # The remaining zram escape hatches -- diskSizeOverride is covered by
+  # cfg-override above, these four were never exercised by any check.
+  cfg-override-resident-limit = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.zram.residentLimitOverride = "ram / 8";
+  };
+  cfg-override-priority = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.zram.priorityOverride = 50;
+  };
+  cfg-override-recompression-algorithm = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.zram.recompressionAlgorithmOverride = "zstd(level=12)";
+  };
+  cfg-override-compression-algorithm = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.zram.compressionAlgorithmOverride = "lzo-rle";
+  };
+
+  # zswap's own overrides (acceptThresholdPercent/shrinkerEnabled/diskMedium)
+  # and oomd's (protectedUnits/minFreeKbytesOverride/pressureDiagnostics) --
+  # none of these were ever set away from their defaults by any check.
+  cfg-override-zswap = evalFor {
+    services.nixram.level = "16G";
+    services.nixram.mode = "zswap";
+    swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
+    services.nixram.zswap.acceptThresholdPercent = 70;
+    services.nixram.zswap.shrinkerEnabled = false;
+    services.nixram.zswap.diskMedium = "hdd";
+  };
+  cfg-override-oomd = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.oomd.protectedUnits = [ "nixram-test-example.service" ];
+    services.nixram.oomd.pressureDiagnostics.enable = true;
+    services.nixram.minFreeKbytesOverride = 65536;
+  };
+
+  # --- level-matrix ---------------------------------------------------------
+  # Every one of the 14 levels, evaluated once (mode = zram, the default)
+  # and cross-checked against levels.nix's own raw table. Closes a real gap
+  # found by review 2026-07-24: only 8/14 levels were ever touched by any
+  # eval-test in any mode/backend (a copy-paste slip in the other 6 -- 512M,
+  # 6G, 8G, 10G, 12G, 32G -- could have shipped silently), only 3/14 had
+  # systemd.oomd.enable asserted at all, and the 24G residentLimitExpr/
+  # diskSizeExpr 25%->20% step (flagged in levels.nix's own comment as
+  # "unconfirmed") had zero coverage under this backend. This is the ONE
+  # place that gives every level, including any added later, coverage by
+  # construction rather than by remembering to add another cfg-<level>.
+  cfg-by-level = builtins.listToAttrs (map
+    (name: { inherit name; value = evalFor { services.nixram.level = name; }; })
+    levelsData.levelNames);
+
+  levelMatrixChecks = lib.concatMap
+    (name:
+      let
+        lvl = levelsData.levels.${name};
+        cfg = cfg-by-level.${name};
+        zram0 = cfg.services.zram-generator.settings.zram0;
+        expectedCompression =
+          if lvl.zram.recompressionTimerEnableByDefault && lvl.zram.recompressionAlgorithm != null
+          then "${lvl.zram.compressionAlgorithm} ${lvl.zram.recompressionAlgorithm} (type=idle)"
+          else lvl.zram.compressionAlgorithm;
+      in
+      [
+        (check "level-matrix/${name}/zram-size"
+          (zram0.zram-size == lvl.zram.diskSizeExpr)
+          "got: ${builtins.toJSON (zram0.zram-size or null)}, expected: ${lvl.zram.diskSizeExpr}")
+
+        (check "level-matrix/${name}/zram-resident-limit"
+          ((zram0."zram-resident-limit" or null) == lvl.zram.residentLimitExpr)
+          "got: ${builtins.toJSON (zram0."zram-resident-limit" or null)}, expected: ${builtins.toJSON lvl.zram.residentLimitExpr}")
+
+        (check "level-matrix/${name}/compression-algorithm"
+          (zram0.compression-algorithm == expectedCompression)
+          "got: ${builtins.toJSON zram0.compression-algorithm}, expected: ${expectedCompression}")
+
+        (check "level-matrix/${name}/swap-priority"
+          (zram0.swap-priority == lvl.zram.priority)
+          "got: ${builtins.toJSON zram0.swap-priority}, expected: ${builtins.toJSON lvl.zram.priority}")
+
+        (check "level-matrix/${name}/sysctl-swappiness"
+          ((cfg.boot.kernel.sysctl."vm.swappiness" or null) == lvl.swappiness)
+          "got: ${builtins.toJSON (cfg.boot.kernel.sysctl."vm.swappiness" or null)}, expected: ${builtins.toJSON lvl.swappiness}")
+
+        (check "level-matrix/${name}/sysctl-watermark-scale-factor"
+          ((cfg.boot.kernel.sysctl."vm.watermark_scale_factor" or null) == lvl.watermarkScaleFactor)
+          "got: ${builtins.toJSON (cfg.boot.kernel.sysctl."vm.watermark_scale_factor" or null)}, expected: ${builtins.toJSON lvl.watermarkScaleFactor}")
+
+        (check "level-matrix/${name}/sysctl-watermark-boost-factor"
+          ((cfg.boot.kernel.sysctl."vm.watermark_boost_factor" or null) == lvl.watermarkBoostFactor)
+          "got: ${builtins.toJSON (cfg.boot.kernel.sysctl."vm.watermark_boost_factor" or null)}, expected: ${builtins.toJSON lvl.watermarkBoostFactor}")
+
+        (check "level-matrix/${name}/oomd-enable"
+          (cfg.systemd.oomd.enable == lvl.oomd.enable)
+          "got: ${builtins.toJSON cfg.systemd.oomd.enable}, expected: ${builtins.toJSON lvl.oomd.enable}")
+
+        (check "level-matrix/${name}/recompress-timer-presence"
+          ((cfg.systemd.timers ? "nixram-zram-recompress") == lvl.zram.recompressionTimerEnableByDefault)
+          "timers: ${builtins.toJSON (builtins.attrNames cfg.systemd.timers)}, expected present=${builtins.toJSON lvl.zram.recompressionTimerEnableByDefault}")
+
+        (check "level-matrix/${name}/swappiness-relief-presence"
+          ((cfg.systemd.timers ? "nixram-swappiness-relief") == lvl.swappinessReliefEnableByDefault)
+          "timers: ${builtins.toJSON (builtins.attrNames cfg.systemd.timers)}, expected present=${builtins.toJSON lvl.swappinessReliefEnableByDefault}")
+      ]
+      ++ lib.optional lvl.oomd.enable
+        (check "level-matrix/${name}/root-slice-pressure-limit"
+          ((cfg.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null) == "${toString lvl.oomd.pressureLimitPercent}%")
+          "got: ${builtins.toJSON (cfg.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}"))
+    levelsData.levelNames;
 
   results = [
     # --- level-4G-defaults ------------------------------------------------
@@ -315,6 +436,33 @@ let
       (lib.any (a: a.assertion == false && lib.hasInfix "detect-level" a.message) cfg-level-unset.assertions)
       "assertions: ${builtins.toJSON (map (a: { inherit (a) assertion message; }) cfg-level-unset.assertions)}")
 
+    # A populated `assertions` list on its own proves nothing -- NixOS's
+    # real enforcement runs when `system.build.toplevel` is forced, not on
+    # a bare read of `config.assertions` (a passive list). This proves the
+    # documented "hard evaluation error" contract by actually forcing that
+    # path, the same way a real `nixos-rebuild`/`nix build .#nixosConfigurations.<host>`
+    # would.
+    (check "level-unset-assertion/toplevel-build-actually-fails"
+      (evalFailsBuild { services.nixram.level = null; })
+      "expected forcing system.build.toplevel to fail for level=null, but it succeeded")
+
+    # --- new-assertions (2026-07-24 review) --------------------------------
+    (check "recompression-timer-requires-algorithm/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "256M";
+        services.nixram.zram.recompressionTimer.enable = true;
+      })
+      "expected forcing system.build.toplevel to fail (256M has recompressionAlgorithm=null) but it succeeded")
+
+    (check "zram-override-wrong-mode/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "16G";
+        services.nixram.mode = "zswap";
+        swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
+        services.nixram.zram.diskSizeOverride = "ram / 4";
+      })
+      "expected forcing system.build.toplevel to fail (zram override set while mode=zswap) but it succeeded")
+
     # --- mode-none -------------------------------------------------------
     (check "mode-none/no-zram0"
       (!(cfg-mode-none.services.zram-generator.settings ? "zram0"))
@@ -348,7 +496,48 @@ let
     (check "override-wins/root-slice-keeps-nixram-default-when-only-user-overridden"
       (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
       "got: ${builtins.toJSON (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
-  ];
+
+    (check "override-wins/resident-limit-override"
+      (cfg-override-resident-limit.services.zram-generator.settings.zram0."zram-resident-limit" == "ram / 8")
+      "got: ${builtins.toJSON (cfg-override-resident-limit.services.zram-generator.settings.zram0."zram-resident-limit" or null)}")
+
+    (check "override-wins/priority-override"
+      (cfg-override-priority.services.zram-generator.settings.zram0.swap-priority == 50)
+      "got: ${builtins.toJSON cfg-override-priority.services.zram-generator.settings.zram0.swap-priority}")
+
+    (check "override-wins/recompression-algorithm-override"
+      (cfg-override-recompression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lz4 zstd(level=12) (type=idle)")
+      "got: ${builtins.toJSON cfg-override-recompression-algorithm.services.zram-generator.settings.zram0.compression-algorithm}")
+
+    (check "override-wins/compression-algorithm-override"
+      (cfg-override-compression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lzo-rle zstd(level=3) (type=idle)")
+      "got: ${builtins.toJSON cfg-override-compression-algorithm.services.zram-generator.settings.zram0.compression-algorithm}")
+
+    (check "override-wins/zswap-accept-threshold-percent"
+      (lib.elem "zswap.accept_threshold_percent=70" cfg-override-zswap.boot.kernelParams)
+      "kernelParams: ${builtins.toJSON cfg-override-zswap.boot.kernelParams}")
+
+    (check "override-wins/zswap-shrinker-disabled"
+      (!(lib.any (p: lib.hasPrefix "zswap.shrinker_enabled" p) cfg-override-zswap.boot.kernelParams))
+      "kernelParams: ${builtins.toJSON cfg-override-zswap.boot.kernelParams}")
+
+    (check "override-wins/zswap-disk-medium-hdd-no-page-cluster"
+      (!(cfg-override-zswap.boot.kernel.sysctl ? "vm.page-cluster"))
+      "got: ${builtins.toJSON (cfg-override-zswap.boot.kernel.sysctl."vm.page-cluster" or null)}")
+
+    (check "override-wins/oomd-protected-units-override"
+      (cfg-override-oomd.systemd.services."nixram-test-example".serviceConfig.OOMScoreAdjust == -900)
+      "got: ${builtins.toJSON (cfg-override-oomd.systemd.services."nixram-test-example".serviceConfig.OOMScoreAdjust or null)}")
+
+    (check "override-wins/oomd-min-free-kbytes-override"
+      (cfg-override-oomd.boot.kernel.sysctl."vm.min_free_kbytes" == 65536)
+      "got: ${builtins.toJSON (cfg-override-oomd.boot.kernel.sysctl."vm.min_free_kbytes" or null)}")
+
+    (check "override-wins/oomd-pressure-diagnostics-enable-override"
+      (cfg-override-oomd.systemd.timers ? "nixram-pressure-diagnostics")
+      "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-override-oomd.systemd.timers)}")
+  ]
+  ++ levelMatrixChecks;
 
   failed = builtins.filter (r: !r.ok) results;
 

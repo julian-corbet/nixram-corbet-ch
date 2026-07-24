@@ -49,6 +49,25 @@ let
     services.nixram.oomd.enable = false;
   };
 
+  # Proves the missing-mkDefault regression (found by review 2026-07-24,
+  # fixed in system-manager/oomd.nix) stays fixed: a host must be able to
+  # override just ONE slice with a plain assignment, no lib.mkForce, the
+  # same escape hatch checks/default.nix's NixOS-side equivalent test
+  # (override-wins/user-slice-plain-override-no-mkforce-needed) already
+  # proves for the NixOS backend.
+  cfg-override-user-slice = evalFor {
+    services.nixram.level = "24G";
+    systemd.slices."user".sliceConfig = { };
+  };
+
+  # Proves the zswap-boot-params-check regression (found by review
+  # 2026-07-24: only 3 of 6 documented parameters were ever verified,
+  # fixed in system-manager/zswap-boot-params-check.nix) stays fixed.
+  cfg-override-accept-threshold = evalFor {
+    services.nixram.level = "24G";
+    services.nixram.zswap.acceptThresholdPercent = 70;
+  };
+
   results = [
     # --- level-24G-defaults (mode = zswap) --------------------------------
     (check "sm-24G/sysctl-file-sorts-after-distro-defaults"
@@ -183,6 +202,36 @@ let
     (check "sm-oomd-disabled/protected-units-still-applied"
       (cfg-oomd-disabled.environment.etc ? "systemd/system/sshd.service.d/nixram-oom-protect.conf")
       "environment.etc keys: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled.environment.etc)}")
+
+    # --- override-wins (regression tests for the 2026-07-24 review fixes) --
+    (check "sm-override-wins/user-slice-plain-override-no-mkforce-needed"
+      (cfg-override-user-slice.systemd.slices."user".sliceConfig == { })
+      "got: ${builtins.toJSON cfg-override-user-slice.systemd.slices."user".sliceConfig}")
+
+    (check "sm-override-wins/root-slice-keeps-nixram-default-when-only-user-overridden"
+      (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
+      "got: ${builtins.toJSON (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
+
+    (check "sm-override-wins/accept-threshold-percent-in-preactivation-script"
+      (lib.hasInfix "check_param accept_threshold_percent 70"
+        cfg-override-accept-threshold.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-override-accept-threshold.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    # --- zswap-check-completeness ------------------------------------------
+    (check "sm-zswap-check/verifies-compressor"
+      (lib.hasInfix "check_param compressor zstd"
+        cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    (check "sm-zswap-check/verifies-zpool"
+      (lib.hasInfix "check_param zpool zsmalloc"
+        cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    (check "sm-zswap-check/verifies-accept-threshold-percent-default"
+      (lib.hasInfix "check_param accept_threshold_percent 90"
+        cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;

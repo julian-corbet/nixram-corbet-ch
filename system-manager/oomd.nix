@@ -87,8 +87,18 @@ in
     # keeps its own existing, differently-shaped oomd setup for round one).
     environment.etc = listToAttrs (map protectedUnitEtcEntry cfg.oomd.protectedUnits);
 
-    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
-    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable pressureSliceConfig;
+    # mkDefault on the CONTENTS, not just the mkIf gate -- same fix and same
+    # reason as modules/oomd.nix:165-166 (this backend had silently dropped
+    # it on the port): a host needs to be able to override "-.slice" or
+    # "user.slice" INDEPENDENTLY with a plain assignment, no lib.mkForce
+    # needed, per the project's "escape hatch on every layer" stance.
+    # Without mkDefault here, a host redefining a shared key at the same
+    # priority throws "conflicting definition values"; redefining the whole
+    # slice to `{}` silently wins instead of clearing to nixram's default --
+    # both worse than the NixOS module's own behavior for the identical
+    # option.
+    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

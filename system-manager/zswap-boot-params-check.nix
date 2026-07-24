@@ -56,7 +56,10 @@ let
     }
 
     check_param enabled Y
+    check_param compressor zstd
+    check_param zpool zsmalloc
     check_param max_pool_percent ${toString cfg.zswap.maxPoolPercent}
+    check_param accept_threshold_percent ${toString cfg.zswap.acceptThresholdPercent}
     check_param shrinker_enabled ${if cfg.zswap.shrinkerEnabled then "Y" else "N"}
 
     if [ "$fail" != "0" ]; then
@@ -69,7 +72,7 @@ let
       echo "Add to the kernel command line (e.g. /etc/kernel/cmdline + limine-mkinitcpio, or" >&2
       echo "your bootloader's equivalent) and reboot:" >&2
       echo "" >&2
-      echo "    zswap.enabled=1 zswap.shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "1" else "0"} zswap.max_pool_percent=${toString cfg.zswap.maxPoolPercent}" >&2
+      echo "    zswap.enabled=1 zswap.compressor=zstd zswap.zpool=zsmalloc zswap.max_pool_percent=${toString cfg.zswap.maxPoolPercent} zswap.accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent} zswap.shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "1" else "0"}" >&2
       echo "" >&2
       echo "If those params are already present and this still fails: on CachyOS (and any" >&2
       echo "distro sharing its cachyos-settings package), check for a udev rule that disables" >&2
@@ -79,7 +82,7 @@ let
       exit 1
     fi
 
-    echo "nixram: zswap verified active (max_pool_percent=${toString cfg.zswap.maxPoolPercent}, shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "Y" else "N"})"
+    echo "nixram: zswap verified active (compressor=zstd, zpool=zsmalloc, max_pool_percent=${toString cfg.zswap.maxPoolPercent}, accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent}, shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "Y" else "N"})"
   '';
 in
 {

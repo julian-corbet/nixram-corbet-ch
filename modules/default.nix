@@ -381,6 +381,41 @@ in
           swap device, zswap.enabled=1 is a no-op.
         '';
       }
+      {
+        assertion = (cfg.mode == "zram" && cfg.zram.recompressionTimer.enable) -> (
+          cfg.zram.recompressionAlgorithmOverride != null
+          || activeLevel.zram.recompressionAlgorithm != null
+        );
+        message = ''
+          services.nixram.zram.recompressionTimer.enable = true has no
+          effect at level "${activeLevelName}": its recompressionAlgorithm
+          is null (the 256M/512M/1G default -- primary-only compression,
+          no secondary idle-pass algorithm is ever registered on the
+          device), so the timer would arm a service that writes
+          "type=idle" to zram's recompress attribute with nothing for it
+          to do. Set zram.recompressionAlgorithmOverride (e.g.
+          "zstd(level=12)") alongside recompressionTimer.enable at this
+          level, or leave the timer off.
+        '';
+      }
+      {
+        assertion = cfg.mode == "zram" || (
+          cfg.zram.diskSizeOverride == null
+          && cfg.zram.residentLimitOverride == null
+          && cfg.zram.priorityOverride == null
+          && cfg.zram.recompressionAlgorithmOverride == null
+          && cfg.zram.compressionAlgorithmOverride == null
+        );
+        message = ''
+          services.nixram.zram.* override option(s) are set but
+          services.nixram.mode is "${cfg.mode}", not "zram" -- these
+          options are silently inert outside zram mode (modules/zram.nix's
+          whole config block is gated on mode == "zram"). Either set
+          mode = "zram", or remove the zram.* override(s), so a leftover
+          override from a prior mode migration can't look active when it
+          isn't.
+        '';
+      }
     ];
   };
 }

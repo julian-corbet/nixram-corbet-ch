@@ -144,7 +144,16 @@ let
 
     psi=/proc/pressure/memory
     state_file=/run/nixram-swappiness-relief.state
-    baseline=${toString activeLevel.swappiness}
+    # The ACTUAL resolved sysctl value, not the tier's raw levels.nix
+    # constant -- modules/sysctls.nix sets "vm.swappiness" via mkDefault, so
+    # a host is free to override it (the "escape hatch on every layer"
+    # contract every sysctl here carries). Baking activeLevel.swappiness in
+    # directly would ignore that override entirely: the first time relief
+    # is entered and then left, this script would silently revert the
+    # host's chosen value back to nixram's own stale tier default. Falls
+    # back to the tier constant only if nothing (nixram or a host) ever set
+    # the sysctl at all (e.g. sysctls.enable = false).
+    baseline=${toString (config.boot.kernel.sysctl."vm.swappiness" or activeLevel.swappiness)}
     relief=${toString cfg.zram.swappinessRelief.reliefValue}
     high=${toString cfg.zram.swappinessRelief.pressureHighThreshold}
     low=${toString cfg.zram.swappinessRelief.pressureLowThreshold}
