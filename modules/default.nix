@@ -322,20 +322,119 @@ in
       description = "systemd OnCalendar= expression for the pressure-diagnostics timer. Diagnostic logging only -- a coarse interval is fine; tune freely.";
     };
 
-    oomd.protectedUnits = mkOption {
-      type = types.listOf types.str;
-      default = [ "sshd.service" ];
+    oomd.units = mkOption {
+      type = types.attrsOf (types.submodule {
+        options = {
+          memoryMin = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "systemd MemoryMin= for this unit -- a hard reservation the kernel can NEVER reclaim.";
+          };
+          memoryLow = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "systemd MemoryLow= for this unit -- a soft floor, reclaimed only when nothing else is.";
+          };
+          memoryHigh = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "systemd MemoryHigh= for this unit -- a throttle threshold.";
+          };
+          memoryMax = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = "systemd MemoryMax= for this unit -- a hard wall (the cgroup OOM-kills inside itself first).";
+          };
+          oomScoreAdjust = mkOption {
+            type = types.nullOr (types.ints.between (-1000) 1000);
+            default = -900;
+            description = "The kernel OOM killer's own last-resort fallback layer -- protects this unit even if systemd-oomd is disabled, absent, or too slow to react. Set null to leave unset for this unit.";
+          };
+          managedOOMPreference = mkOption {
+            type = types.nullOr (types.enum [ "omit" "avoid" "auto" ]);
+            default = "omit";
+            description = ''"omit" never a kill candidate, "avoid" merely de-prioritised, only meaningful while systemd-oomd actually runs. Set null to leave unset for this unit.'';
+          };
+          restartSec = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = ''
+              Escape hatch: RestartSec= for this unit, paired with a
+              generous StartLimitBurst/IntervalSec so a brief oomd/kernel
+              OOM kill self-heals instead of latching the unit "failed".
+              Off (null) by default -- most units don't need this; it
+              exists for data services worth restarting fast after a
+              memory-pressure kill.
+            '';
+          };
+        };
+      });
+      default = { "sshd.service" = { }; };
       description = ''
-        systemd SERVICES set to `ManagedOOMPreference = "omit"`
-        (systemd-oomd's userspace layer, applied at every level
-        regardless of `oomd.enable`) AND `OOMScoreAdjust = -900` (the
-        kernel OOM killer's own last-resort fallback layer, always
-        applied). Two independent protection layers, deliberately
-        redundant: the second one is what still protects these units
-        even if systemd-oomd itself is disabled, absent, or too slow to
-        react. Name existing services only (a name that matches no real
-        service would materialize a skeleton unit); the `.service`
-        suffix is accepted and normalized away.
+        Per-unit memory-pressure protection, keyed by systemd unit name
+        (the `.service` suffix is accepted and normalized away; a name
+        matching no real service materializes a skeleton unit). Two
+        independent kinds of protection, both optional per unit: the
+        MemoryMin/Low/High/Max resource ladder (cgroup memory
+        accounting), and the oomScoreAdjust + managedOOMPreference
+        kill-priority pair (kernel fallback + systemd-oomd's own
+        preference, deliberately redundant -- the kernel layer is what
+        still protects a unit even if systemd-oomd itself is disabled,
+        absent, or too slow to react). The default protects only sshd at
+        the kill-priority layer with no resource ladder -- the historical
+        `protectedUnits` behavior, preserved as this option's default so
+        an existing config that never touched it sees no change.
+      '';
+    };
+
+    oomd.sacrificialSlices = mkOption {
+      type = types.attrsOf (types.submodule {
+        options = {
+          memoryHigh = mkOption {
+            type = types.str;
+            description = "systemd MemoryHigh= for this slice (throttle threshold).";
+          };
+          memoryMax = mkOption {
+            type = types.str;
+            description = "systemd MemoryMax= for this slice (hard wall).";
+          };
+          pressureLimitPercent = mkOption {
+            type = types.ints.between 1 100;
+            default = 60;
+            description = "PSI ManagedOOMMemoryPressureLimit for this slice -- deliberately NOT tied to the level's own oomd.pressureLimitPercent, since a sacrificial slice usually wants to trip well before the box-wide limit.";
+          };
+        };
+      });
+      default = { };
+      description = ''
+        Named systemd slices deliberately given NO oomd avoid/omit
+        weighting, so they are the FIRST thing systemd-oomd reclaims
+        under pressure -- e.g. a lower-priority container workload
+        sharing the box with the protected units above. Unlike
+        `oomd.units` (which protects), this is a structural blast-radius
+        cap: a hard MemoryMax wall plus its own PSI kill limit, one slice
+        per attribute name (rendered as "<name>.slice"). Empty by default
+        -- most boxes have nothing to sacrifice.
+      '';
+    };
+
+    oomd.swapUsedLimitPercent = mkOption {
+      type = types.nullOr (types.ints.between 1 100);
+      default = null;
+      description = ''
+        Escape hatch: also arm systemd-oomd's global SwapUsedLimit
+        (percent of zram's DISKSIZE, not physical usage) alongside the
+        PSI-based per-slice kill this module already configures. OFF by
+        default: under `zram.sizing = "both"` (nixram's own default),
+        disksize is deliberately generous relative to the real
+        `zram-resident-limit` budget, so a swap-used-of-disksize
+        percentage reads "plenty of headroom" right up until the
+        resident limit -- the actual wall -- is hit, too late to act as
+        an early warning (see docs/faq.md, "Why aren't SwapUsedLimit /
+        ManagedOOMSwap configured anywhere?"). Set this only if you
+        understand that blind spot and want it anyway as a redundant,
+        defense-in-depth signal alongside PSI -- e.g. matching an
+        existing incident-tuned host config that already relies on it.
       '';
     };
 
@@ -414,6 +513,46 @@ in
           mode = "zram", or remove the zram.* override(s), so a leftover
           override from a prior mode migration can't look active when it
           isn't.
+        '';
+      }
+      {
+        # modules/oomd.nix builds `systemd.slices` as
+        # `listToAttrs (map sacrificialSliceEntry ...) // { "-" = ...; "user" = ...; }`
+        # -- a plain, shallow Nix `//`, not a module-system merge. A
+        # sacrificialSlices entry keyed "-"/"-.slice"/"user"/"user.slice"
+        # would be silently and completely discarded by that merge (the
+        # hardcoded literal on the right always wins the whole key), losing
+        # its MemoryHigh/MemoryMax containment with no build error at all.
+        # Caught adversarially; see the finding this assertion closes.
+        assertion = !(cfg.oomd.sacrificialSlices ? "-")
+          && !(cfg.oomd.sacrificialSlices ? "-.slice")
+          && !(cfg.oomd.sacrificialSlices ? "user")
+          && !(cfg.oomd.sacrificialSlices ? "user.slice");
+        message = ''
+          services.nixram.oomd.sacrificialSlices must not use the reserved
+          names "-" / "-.slice" or "user" / "user.slice" -- those are the
+          two slices this module itself already manages (the box-wide PSI
+          root and user slices). A sacrificialSlices entry with either name
+          would be silently discarded by an internal merge, losing its
+          MemoryHigh/MemoryMax containment with no error. Pick a different
+          slice name for whatever workload you're sacrificing.
+        '';
+      }
+      {
+        # Same shallow-`//` hazard as above, for `systemd.services` this
+        # time: modules/oomd.nix merges `oomd.units` entries with its own
+        # hardcoded `nixram-pressure-diagnostics` service literal. A unit
+        # named exactly that would have its whole protection config
+        # (memory ladder, oomScoreAdjust, restartSec) silently discarded.
+        assertion = !(cfg.oomd.units ? "nixram-pressure-diagnostics")
+          && !(cfg.oomd.units ? "nixram-pressure-diagnostics.service");
+        message = ''
+          services.nixram.oomd.units must not use the reserved name
+          "nixram-pressure-diagnostics" (with or without the ".service"
+          suffix) -- that is this module's own internal PSI diagnostics
+          service name. A unit entry with that name would be silently
+          discarded by an internal merge, losing its protection config
+          with no error.
         '';
       }
     ];

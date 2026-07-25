@@ -11,25 +11,27 @@
 # `systemd.slices."-.slice"` would silently render a unit named
 # "-.slice.slice" that systemd never consults.
 #
-# DELIBERATELY NOT USING SwapUsedLimit / ManagedOOMSwap ANYWHERE. This
-# is a documented omission, not an oversight -- see docs/faq.md. Reason:
-# SwapUsedLimit and the per-unit `ManagedOOMSwap=kill` opt-in are both
-# swap-USED-over-swap-TOTAL percentage detectors, and swap-TOTAL here
-# means zram's `disksize`. On every level where `zram.sizing = "both"`
-# (the default) and disksize is set generously beyond the real
-# `residentLimit` safety budget -- which is nixram's whole thesis, see
-# levels.nix -- that percentage is measured against a denominator that
-# was never meant to be the real ceiling. A swap-percentage detector
-# reads that setup as "plenty of headroom" right up until the resident
-# limit (the actual wall) is hit, at which point it's already too late
-# for a percentage-of-disksize warning to have fired early. PSI-based
-# detection has no such blind spot: stall time is medium-agnostic, it
-# doesn't care whether the swap medium is zram, zswap, or a disk
-# partition, or how large its nominal capacity is. So nixram configures
-# ManagedOOMMemoryPressure (PSI) and nothing else, on every tier, and
-# never sets SwapUsedLimit or ManagedOOMSwap=kill anywhere. This isn't a
-# "keep it as a decorative secondary backstop" compromise -- it's not
-# configured at all.
+# SwapUsedLimit / ManagedOOMSwap: OFF BY DEFAULT, opt-in via
+# `oomd.swapUsedLimitPercent`. This is a documented default, not an
+# oversight -- see docs/faq.md. Reason: SwapUsedLimit and the per-unit
+# `ManagedOOMSwap=kill` opt-in are both swap-USED-over-swap-TOTAL
+# percentage detectors, and swap-TOTAL here means zram's `disksize`. On
+# every level where `zram.sizing = "both"` (the default) and disksize is
+# set generously beyond the real `residentLimit` safety budget -- which
+# is nixram's whole thesis, see levels.nix -- that percentage is
+# measured against a denominator that was never meant to be the real
+# ceiling. A swap-percentage detector reads that setup as "plenty of
+# headroom" right up until the resident limit (the actual wall) is hit,
+# at which point it's already too late for a percentage-of-disksize
+# warning to have fired early. PSI-based detection has no such blind
+# spot: stall time is medium-agnostic, it doesn't care whether the swap
+# medium is zram, zswap, or a disk partition, or how large its nominal
+# capacity is. So `ManagedOOMMemoryPressure` (PSI) is what every tier
+# gets BY DEFAULT; SwapUsedLimit stays off unless a host explicitly opts
+# in (e.g. to match an existing incident-tuned config that already relies
+# on it as a redundant, defense-in-depth signal alongside PSI) --
+# `ManagedOOMSwap=kill` (the PER-UNIT equivalent) still has no opt-in
+# anywhere; only the box-wide SwapUsedLimit does.
 #
 # We do not use the built-in `systemd.oomd.enableRootSlice` /
 # `enableSystemSlice` / `enableUserSlices` helpers: they hardcode an 80%
@@ -82,22 +84,52 @@ let
       "${toString (if cfg.mode == "zswap" then zswapOomdPressureDurationSec else activeLevel.oomd.pressureDurationSec)}s";
   };
 
-  # One serviceConfig per protected unit, merging both protection
-  # layers: OOMScoreAdjust (kernel-fallback layer -- this is what still
-  # protects the unit even if systemd-oomd is disabled, absent, or too
-  # slow to react) and ManagedOOMPreference (systemd-oomd's own
-  # userspace layer, only meaningful while the daemon actually runs,
-  # harmless to set regardless). Both are unconditional on
-  # `oomd.enable`, per the option's documented contract.
+  # One entry per `oomd.units` unit, merging whichever fields are set:
+  # the MemoryMin/Low/High/Max resource ladder AND the OOMScoreAdjust
+  # (kernel-fallback layer -- this is what still protects the unit even
+  # if systemd-oomd is disabled, absent, or too slow to react) /
+  # ManagedOOMPreference (systemd-oomd's own userspace layer, only
+  # meaningful while the daemon actually runs) kill-priority pair, plus
+  # an optional RestartSec resilience pairing. All unconditional on
+  # `oomd.enable`, per the option's documented contract -- these are
+  # per-unit settings, not part of the PSI slice config below.
   #
   # `systemd.services` attribute names also exclude the ".service"
   # suffix (same naming rule as slices above), so accept either form in
-  # `protectedUnits` and normalize here.
-  protectedUnitEntry = unit: {
-    name = removeSuffix ".service" unit;
-    value.serviceConfig = {
-      OOMScoreAdjust = mkDefault (-900);
-      ManagedOOMPreference = mkDefault "omit";
+  # `oomd.units` and normalize here.
+  unitEntry = name: spec:
+    let
+      serviceConfig =
+        optionalAttrs (spec.memoryMin != null) { MemoryMin = mkDefault spec.memoryMin; }
+        // optionalAttrs (spec.memoryLow != null) { MemoryLow = mkDefault spec.memoryLow; }
+        // optionalAttrs (spec.memoryHigh != null) { MemoryHigh = mkDefault spec.memoryHigh; }
+        // optionalAttrs (spec.memoryMax != null) { MemoryMax = mkDefault spec.memoryMax; }
+        // optionalAttrs (spec.oomScoreAdjust != null) { OOMScoreAdjust = mkDefault spec.oomScoreAdjust; }
+        // optionalAttrs (spec.managedOOMPreference != null) { ManagedOOMPreference = mkDefault spec.managedOOMPreference; }
+        // optionalAttrs (spec.restartSec != null) { RestartSec = mkDefault spec.restartSec; };
+    in
+    {
+      name = removeSuffix ".service" name;
+      value = { inherit serviceConfig; }
+      // optionalAttrs (spec.restartSec != null) {
+        unitConfig = {
+          StartLimitBurst = mkDefault 20;
+          StartLimitIntervalSec = mkDefault "5min";
+        };
+      };
+    };
+
+  # One systemd.slices.<name> entry per `oomd.sacrificialSlices` -- deliberately
+  # NO OOMScoreAdjust/ManagedOOMPreference weighting (the whole point is to be
+  # first in line, not protected). Same ".slice"-suffix-excluded naming rule.
+  sacrificialSliceEntry = name: spec: {
+    name = removeSuffix ".slice" name;
+    value.sliceConfig = {
+      MemoryAccounting = true;
+      MemoryHigh = spec.memoryHigh;
+      MemoryMax = spec.memoryMax;
+      ManagedOOMMemoryPressure = "kill";
+      ManagedOOMMemoryPressureLimit = "${toString spec.pressureLimitPercent}%";
     };
   };
 
@@ -126,7 +158,7 @@ in
     # Nix's own attrset-literal rule rejects defining `systemd.services`
     # both directly (a set) and via a dotted sub-path in the same literal
     # ("attribute already defined"), independent of NixOS module merging.
-    systemd.services = listToAttrs (map protectedUnitEntry cfg.oomd.protectedUnits) // {
+    systemd.services = listToAttrs (mapAttrsToList unitEntry cfg.oomd.units) // {
       nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
         description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";
         # Explicit PATH dependency for `awk` -- same missing-dependency
@@ -162,8 +194,20 @@ in
     # while working out how a real fleet host (e2-micro) could preserve its
     # own incident-tuned oomd config (root slice at 80%, user slice
     # deliberately left unarmed) on top of nixram.
-    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
-    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    # `//`-merged with the sacrificial slices for the same reason as
+    # `systemd.services` above -- one `systemd.slices` attrset, not a mix of
+    # dotted-path and whole-set assignment in the same module.
+    systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices) // {
+      "-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+      "user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    };
+
+    # SwapUsedLimit: OFF unless a host opts in -- see the option's own doc
+    # comment (modules/default.nix) and docs/faq.md for the blind-spot
+    # reasoning this module otherwise deliberately avoids it for.
+    systemd.oomd.settings.OOM = mkIf (cfg.oomd.swapUsedLimitPercent != null) {
+      SwapUsedLimit = mkDefault "${toString cfg.oomd.swapUsedLimitPercent}%";
+    };
 
     systemd.timers.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "Timer for nixram PSI pressure diagnostic snapshot";

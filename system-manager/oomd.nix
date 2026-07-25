@@ -11,19 +11,22 @@
 #     NixOS module) -- no such option exists here. Assumed already running
 #     via the distro's own defaults. `oomd.enable` here (default.nix) only
 #     gates whether nixram ARMS the slice config below, not the daemon.
-#   - `oomd.protectedUnits` -- system-manager cannot merge options into a
-#     FOREIGN unit's serviceConfig (sshd.service is pacman-owned here, not
-#     declared by this config at all), so the same net effect
-#     (OOMScoreAdjust=-900 + ManagedOOMPreference=omit) is achieved via a
+#   - `oomd.units` -- system-manager cannot merge options into a FOREIGN
+#     unit's serviceConfig (sshd.service is pacman-owned here, not declared
+#     by this config at all), so every field renders as a line in a
 #     `<unit>.d/` systemd drop-in file instead -- systemd's own native
 #     override mechanism, exactly the pattern elitebook's own
 #     `oomd.conf.d/99-ai-workload.conf` already proves works for a different
 #     unit under this same tool.
 #
-# Root-cause note carried over from the NixOS module: DELIBERATELY NOT USING
-# SwapUsedLimit / ManagedOOMSwap ANYWHERE -- see modules/oomd.nix's own header
-# comment for the full reasoning (PSI stall time has no blind spot the way a
-# swap-used/swap-total percentage detector does). Applies identically here.
+# SwapUsedLimit / ManagedOOMSwap: OFF BY DEFAULT, opt-in via
+# `oomd.swapUsedLimitPercent` -- see modules/oomd.nix's own header comment for
+# the full blind-spot reasoning (PSI stall time has no blind spot the way a
+# swap-used/swap-total percentage detector does). Applies identically here;
+# rendered as an `oomd.conf.d/` drop-in below since this backend has no
+# `systemd.oomd.*` option surface to set natively. `ManagedOOMSwap=kill` (the
+# PER-UNIT equivalent) still has no opt-in anywhere; only the box-wide
+# SwapUsedLimit does.
 
 { lib, config, pkgs, ... }:
 
@@ -49,21 +52,50 @@ let
       "${toString (if cfg.mode == "zswap" then zswapOomdPressureDurationSec else cfg.oomd.pressureDurationSec)}s";
   };
 
-  protectedUnitEtcEntry = unit:
+  # Same `oomd.units` model as modules/oomd.nix, rendered differently:
+  # system-manager cannot merge into a FOREIGN unit's native option tree
+  # (sshd.service is pacman-owned here, not declared by this config at
+  # all), so every field renders as a line in a `<unit>.d/` systemd
+  # drop-in file instead -- systemd's own native override mechanism.
+  # Only fields the spec actually set produce a line; the [Unit] section
+  # is omitted entirely when restartSec is unset.
+  unitDropinEntry = name: spec:
     let
-      name = removeSuffix ".service" unit;
+      cleanName = removeSuffix ".service" name;
+      serviceLines =
+        optional (spec.memoryMin != null) "MemoryMin=${spec.memoryMin}"
+        ++ optional (spec.memoryLow != null) "MemoryLow=${spec.memoryLow}"
+        ++ optional (spec.memoryHigh != null) "MemoryHigh=${spec.memoryHigh}"
+        ++ optional (spec.memoryMax != null) "MemoryMax=${spec.memoryMax}"
+        ++ optional (spec.oomScoreAdjust != null) "OOMScoreAdjust=${toString spec.oomScoreAdjust}"
+        ++ optional (spec.managedOOMPreference != null) "ManagedOOMPreference=${spec.managedOOMPreference}"
+        ++ optional (spec.restartSec != null) "RestartSec=${spec.restartSec}";
+      unitLines =
+        optionals (spec.restartSec != null) [ "StartLimitBurst=20" "StartLimitIntervalSec=5min" ];
     in
     {
-      name = "systemd/system/${name}.service.d/nixram-oom-protect.conf";
+      name = "systemd/system/${cleanName}.service.d/nixram-oom-protect.conf";
       value = {
         replaceExisting = true;
-        text = ''
-          [Service]
-          OOMScoreAdjust=-900
-          ManagedOOMPreference=omit
-        '';
+        text =
+          (optionalString (unitLines != [ ]) "[Unit]\n${concatStringsSep "\n" unitLines}\n\n")
+          + "[Service]\n${concatStringsSep "\n" serviceLines}\n";
       };
     };
+
+  # Same as modules/oomd.nix's sacrificialSliceEntry -- systemd.slices.<name>
+  # is a real, supported system-manager option (see file header), so this
+  # ports over verbatim.
+  sacrificialSliceEntry = name: spec: {
+    name = removeSuffix ".slice" name;
+    value.sliceConfig = {
+      MemoryAccounting = true;
+      MemoryHigh = spec.memoryHigh;
+      MemoryMax = spec.memoryMax;
+      ManagedOOMMemoryPressure = "kill";
+      ManagedOOMMemoryPressureLimit = "${toString spec.pressureLimitPercent}%";
+    };
+  };
 
   pressureDiagnosticsScript = pkgs.writeShellScript "nixram-pressure-diagnostics" ''
     set -euo pipefail
@@ -81,11 +113,22 @@ let
 in
 {
   config = mkIf cfg.enable {
-    # Unconditional on oomd.enable, same as the NixOS module: OOMScoreAdjust
-    # is the kernel-fallback layer, meaningful even with the slice config
-    # below turned off (e.g. while adopting nixram's sysctls on a host that
-    # keeps its own existing, differently-shaped oomd setup for round one).
-    environment.etc = listToAttrs (map protectedUnitEtcEntry cfg.oomd.protectedUnits);
+    # Unconditional on oomd.enable, same as the NixOS module: the kill-priority
+    # layer is meaningful even with the slice config below turned off (e.g.
+    # while adopting nixram's sysctls on a host that keeps its own existing,
+    # differently-shaped oomd setup for round one). SwapUsedLimit -- system-
+    # manager has no `systemd.oomd.*` option surface at all, so it renders as
+    # its own oomd.conf.d drop-in instead of a native option.
+    environment.etc = listToAttrs (mapAttrsToList unitDropinEntry cfg.oomd.units)
+      // optionalAttrs (cfg.oomd.swapUsedLimitPercent != null) {
+        "systemd/oomd.conf.d/nixram-swap-used-limit.conf" = {
+          replaceExisting = true;
+          text = ''
+            [OOM]
+            SwapUsedLimit=${toString cfg.oomd.swapUsedLimitPercent}%
+          '';
+        };
+      };
 
     # mkDefault on the CONTENTS, not just the mkIf gate -- same fix and same
     # reason as modules/oomd.nix:165-166 (this backend had silently dropped
@@ -96,9 +139,12 @@ in
     # priority throws "conflicting definition values"; redefining the whole
     # slice to `{}` silently wins instead of clearing to nixram's default --
     # both worse than the NixOS module's own behavior for the identical
-    # option.
-    systemd.slices."-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
-    systemd.slices."user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    # option. `//`-merged with the sacrificial slices for the same reason
+    # `environment.etc` above is built as one attrset.
+    systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices) // {
+      "-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+      "user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+    };
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

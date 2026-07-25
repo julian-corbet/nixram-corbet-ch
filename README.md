@@ -81,8 +81,20 @@ There's no default level and no eval-time auto-detection by design — see
 - `zswap.diskMedium` — `"ssd"` (default) or `"hdd"`, drives `page-cluster`.
 - `oomd.enable` — arm systemd-oomd with PSI thresholds (level default; off
   only at 256M).
-- `oomd.protectedUnits` — services given `ManagedOOMPreference = "omit"` +
-  `OOMScoreAdjust = -900` (default `["sshd.service"]`).
+- `oomd.units.<name>` — per-unit memory-pressure protection: an optional
+  `memoryMin/Low/High/Max` resource ladder plus `oomScoreAdjust` (kernel
+  fallback, default -900) and `managedOOMPreference` (systemd-oomd's own
+  layer, default `"omit"`), with an optional `restartSec` resilience pairing.
+  Default `{ "sshd.service" = {}; }` — kill-priority protection only, no
+  resource ladder.
+- `oomd.sacrificialSlices.<name>` — named slices deliberately given NO
+  protection, so they're the FIRST thing reclaimed under pressure (a hard
+  `memoryHigh`/`memoryMax` wall plus their own PSI kill limit). Empty by
+  default.
+- `oomd.swapUsedLimitPercent` — escape hatch: also arm systemd-oomd's global
+  `SwapUsedLimit` alongside PSI. Off by default — see
+  [docs/faq.md](docs/faq.md#why-arent-swapusedlimit--managedoomswap-configured-anywhere)
+  for the blind-spot reasoning.
 - `sysctls.enable` — escape hatch to disable the whole sysctl layer (default
   true).
 - `minFreeKbytesOverride` — escape hatch only; no level sets this by default

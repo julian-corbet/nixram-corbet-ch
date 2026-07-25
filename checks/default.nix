@@ -104,8 +104,8 @@ let
   };
 
   # zswap's own overrides (acceptThresholdPercent/shrinkerEnabled/diskMedium)
-  # and oomd's (protectedUnits/minFreeKbytesOverride/pressureDiagnostics) --
-  # none of these were ever set away from their defaults by any check.
+  # and oomd's (units/minFreeKbytesOverride/pressureDiagnostics) -- none of
+  # these were ever set away from their defaults by any check.
   cfg-override-zswap = evalFor {
     services.nixram.level = "16G";
     services.nixram.mode = "zswap";
@@ -116,9 +116,58 @@ let
   };
   cfg-override-oomd = evalFor {
     services.nixram.level = "4G";
-    services.nixram.oomd.protectedUnits = [ "nixram-test-example.service" ];
+    services.nixram.oomd.units."nixram-test-example.service" = { };
     services.nixram.oomd.pressureDiagnostics.enable = true;
     services.nixram.minFreeKbytesOverride = 65536;
+  };
+
+  # The full richer per-unit ladder (memory ladder + restart resilience) --
+  # nothing exercises a non-default oomd.units entry, or sacrificialSlices,
+  # or swapUsedLimitPercent, without this.
+  cfg-override-oomd-ladder = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.oomd.units."nixram-test-ladder.service" = {
+      memoryMin = "24M";
+      memoryLow = "40M";
+      memoryHigh = "80M";
+      memoryMax = "150M";
+      oomScoreAdjust = -700;
+      managedOOMPreference = "avoid";
+      restartSec = "2s";
+    };
+    services.nixram.oomd.sacrificialSlices."nixram-test-sacrifice" = {
+      memoryHigh = "256M";
+      memoryMax = "320M";
+      pressureLimitPercent = 60;
+    };
+    services.nixram.oomd.swapUsedLimitPercent = 90;
+  };
+
+  # The fully-degenerate case: every field explicitly opted out, including
+  # the two that otherwise default non-null (oomScoreAdjust,
+  # managedOOMPreference). Nothing else exercises this -- the other two
+  # oomd.units fixtures either rely on the submodule's own non-null
+  # defaults (cfg-override-oomd, the implicit sshd default) or set every
+  # field to a non-null value (cfg-override-oomd-ladder).
+  cfg-override-oomd-all-null = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.oomd.units."nixram-test-all-null.service" = {
+      oomScoreAdjust = null;
+      managedOOMPreference = null;
+    };
+  };
+
+  # Proves the "unconditional on oomd.enable" contract (unitEntry's own doc
+  # comment) for the memory ladder / restartSec branches specifically, not
+  # just the trivial score/preference-only default unit every other
+  # oomd.enable=false fixture exercises.
+  cfg-oomd-disabled-with-ladder-unit = evalFor {
+    services.nixram.level = "4G";
+    services.nixram.oomd.enable = false;
+    services.nixram.oomd.units."nixram-test-disabled-ladder.service" = {
+      memoryMin = "24M";
+      restartSec = "2s";
+    };
   };
 
   # --- level-matrix ---------------------------------------------------------
@@ -463,6 +512,38 @@ let
       })
       "expected forcing system.build.toplevel to fail (zram override set while mode=zswap) but it succeeded")
 
+    # --- reserved-name collisions (2026-07-25 adversarial review) ----------
+    # Before the assertions this proves, each of these silently discarded
+    # the operator's whole config via a plain `//` merge in modules/oomd.nix
+    # -- no error at all. Now a hard eval-time failure instead.
+    (check "sacrificial-slice-reserved-name-dash/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "4G";
+        services.nixram.oomd.sacrificialSlices."-" = { memoryHigh = "1G"; memoryMax = "2G"; };
+      })
+      "expected forcing system.build.toplevel to fail (sacrificialSlices named \"-\" collides with the root slice) but it succeeded")
+
+    (check "sacrificial-slice-reserved-name-user/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "4G";
+        services.nixram.oomd.sacrificialSlices."user" = { memoryHigh = "1G"; memoryMax = "2G"; };
+      })
+      "expected forcing system.build.toplevel to fail (sacrificialSlices named \"user\" collides with the user slice) but it succeeded")
+
+    (check "sacrificial-slice-reserved-name-user-slice-suffix/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "4G";
+        services.nixram.oomd.sacrificialSlices."user.slice" = { memoryHigh = "1G"; memoryMax = "2G"; };
+      })
+      "expected forcing system.build.toplevel to fail (sacrificialSlices named \"user.slice\" normalizes to the reserved \"user\" key) but it succeeded")
+
+    (check "oomd-unit-reserved-name-diagnostics/eval-fails"
+      (evalFailsBuild {
+        services.nixram.level = "4G";
+        services.nixram.oomd.units."nixram-pressure-diagnostics" = { memoryMax = "200M"; };
+      })
+      "expected forcing system.build.toplevel to fail (oomd.units named \"nixram-pressure-diagnostics\" collides with nixram's own diagnostics service) but it succeeded")
+
     # --- mode-none -------------------------------------------------------
     (check "mode-none/no-zram0"
       (!(cfg-mode-none.services.zram-generator.settings ? "zram0"))
@@ -536,6 +617,108 @@ let
     (check "override-wins/oomd-pressure-diagnostics-enable-override"
       (cfg-override-oomd.systemd.timers ? "nixram-pressure-diagnostics")
       "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-override-oomd.systemd.timers)}")
+
+    # --- oomd-ladder (the 2026-07-24 "subsume the whole ladder" redesign) --
+    (check "oomd-ladder/unit-memory-min"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMin == "24M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMin or null)}")
+
+    (check "oomd-ladder/unit-memory-max"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMax == "150M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMax or null)}")
+
+    (check "oomd-ladder/unit-memory-low"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryLow == "40M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryLow or null)}")
+
+    (check "oomd-ladder/unit-memory-high"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryHigh == "80M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryHigh or null)}")
+
+    (check "oomd-ladder/unit-oom-score-adjust-override"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.OOMScoreAdjust == -700)
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.OOMScoreAdjust or null)}")
+
+    (check "oomd-ladder/unit-managed-oom-preference-override"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.ManagedOOMPreference == "avoid")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.ManagedOOMPreference or null)}")
+
+    (check "oomd-ladder/unit-restart-sec"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.RestartSec == "2s")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.RestartSec or null)}")
+
+    (check "oomd-ladder/unit-start-limit-burst"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitBurst == 20)
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitBurst or null)}")
+
+    (check "oomd-ladder/unit-start-limit-interval-sec"
+      (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitIntervalSec == "5min")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitIntervalSec or null)}")
+
+    (check "oomd-ladder/sacrificial-slice-memory-max"
+      (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryMax == "320M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryMax or null)}")
+
+    (check "oomd-ladder/sacrificial-slice-memory-high"
+      (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryHigh == "256M")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryHigh or null)}")
+
+    (check "oomd-ladder/sacrificial-slice-pressure-limit"
+      (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
+
+    (check "oomd-ladder/sacrificial-slice-no-kill-priority-weighting"
+      (!(cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig ? "OOMScoreAdjust"))
+      "got: ${builtins.toJSON cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig}")
+
+    (check "oomd-ladder/root-slice-unaffected-by-sacrificial-slice"
+      (cfg-override-oomd-ladder.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
+
+    # The check above alone can't actually discriminate "root slice kept its
+    # own pressureSliceConfig" from "root slice got clobbered by a same-named
+    # sacrificial slice" -- both this ladder fixture's sacrificial slice AND
+    # every level hardcode pressureLimitPercent=60, so both possible outcomes
+    # read "60%". ManagedOOMMemoryPressureDurationSec is a field
+    # sacrificialSliceEntry NEVER sets at all, so its presence (and value)
+    # actually distinguishes the two: a merge collision would make it vanish.
+    (check "oomd-ladder/root-slice-keeps-its-own-duration-field"
+      (cfg-override-oomd-ladder.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureDurationSec == "30s")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureDurationSec or null)}")
+
+    (check "oomd-ladder/swap-used-limit-off-by-default"
+      (!(cfg-4G.systemd.oomd.settings.OOM or { } ? "SwapUsedLimit"))
+      "got: ${builtins.toJSON (cfg-4G.systemd.oomd.settings.OOM.SwapUsedLimit or null)}")
+
+    (check "oomd-ladder/swap-used-limit-opt-in"
+      (cfg-override-oomd-ladder.systemd.oomd.settings.OOM.SwapUsedLimit == "90%")
+      "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.oomd.settings.OOM.SwapUsedLimit or null)}")
+
+    # --- oomd-unit-all-null (fully-degenerate case) -------------------------
+    (check "oomd-unit-all-null/empty-service-config"
+      (cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".serviceConfig == { })
+      "got: ${builtins.toJSON cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".serviceConfig}")
+
+    (check "oomd-unit-all-null/no-start-limit-config"
+      (!(cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".unitConfig ? "StartLimitBurst"))
+      "got: ${builtins.toJSON (cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".unitConfig or null)}")
+
+    # --- oomd-disabled-with-ladder-unit (2026-07-25 review) -----------------
+    (check "oomd-disabled/ladder-fields-still-unconditional-memory-min"
+      (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.MemoryMin == "24M")
+      "got: ${builtins.toJSON (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.MemoryMin or null)}")
+
+    (check "oomd-disabled/ladder-fields-still-unconditional-restart-sec"
+      (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.RestartSec == "2s")
+      "got: ${builtins.toJSON (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.RestartSec or null)}")
+
+    (check "oomd-disabled/ladder-fields-still-unconditional-start-limit"
+      (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".unitConfig.StartLimitIntervalSec == "5min")
+      "got: ${builtins.toJSON (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".unitConfig.StartLimitIntervalSec or null)}")
+
+    (check "oomd-disabled/root-slice-not-armed"
+      (cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig == { })
+      "got: ${builtins.toJSON cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig}")
   ]
   ++ levelMatrixChecks;
 

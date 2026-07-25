@@ -158,17 +158,65 @@ in
         description = "Same option as the NixOS module. Overridden to a shorter duration for `mode = \"zswap\"` the same way, and for the same reason, as the NixOS module -- see modules/oomd.nix.";
       };
 
-      protectedUnits = mkOption {
-        type = types.listOf types.str;
-        default = [ "sshd.service" ];
+      units = mkOption {
+        type = types.attrsOf (types.submodule {
+          options = {
+            memoryMin = mkOption { type = types.nullOr types.str; default = null; description = "Same as the NixOS module's oomd.units.<name>.memoryMin."; };
+            memoryLow = mkOption { type = types.nullOr types.str; default = null; description = "Same as the NixOS module's oomd.units.<name>.memoryLow."; };
+            memoryHigh = mkOption { type = types.nullOr types.str; default = null; description = "Same as the NixOS module's oomd.units.<name>.memoryHigh."; };
+            memoryMax = mkOption { type = types.nullOr types.str; default = null; description = "Same as the NixOS module's oomd.units.<name>.memoryMax."; };
+            oomScoreAdjust = mkOption {
+              type = types.nullOr (types.ints.between (-1000) 1000);
+              default = -900;
+              description = "Same as the NixOS module's oomd.units.<name>.oomScoreAdjust.";
+            };
+            managedOOMPreference = mkOption {
+              type = types.nullOr (types.enum [ "omit" "avoid" "auto" ]);
+              default = "omit";
+              description = "Same as the NixOS module's oomd.units.<name>.managedOOMPreference.";
+            };
+            restartSec = mkOption {
+              type = types.nullOr types.str;
+              default = null;
+              description = "Same as the NixOS module's oomd.units.<name>.restartSec.";
+            };
+          };
+        });
+        default = { "sshd.service" = { }; };
         description = ''
-          Same intent as the NixOS module's `oomd.protectedUnits`, rendered
+          Same intent as the NixOS module's `oomd.units`, rendered
           differently: system-manager cannot set options on a FOREIGN unit
           (one it did not itself declare, e.g. a pacman-shipped sshd.service),
-          so this writes a `<unit>.d/` systemd drop-in file instead of merging
-          into the unit's own option tree. Same net effect
-          (`OOMScoreAdjust=-900` + `ManagedOOMPreference=omit`), different
-          mechanism. Name existing services only.
+          so every field renders as a line in a `<unit>.d/` systemd drop-in
+          file instead of merging into the unit's own option tree. Same net
+          effect, different mechanism. Name existing services only.
+        '';
+      };
+
+      sacrificialSlices = mkOption {
+        type = types.attrsOf (types.submodule {
+          options = {
+            memoryHigh = mkOption { type = types.str; description = "Same as the NixOS module's oomd.sacrificialSlices.<name>.memoryHigh."; };
+            memoryMax = mkOption { type = types.str; description = "Same as the NixOS module's oomd.sacrificialSlices.<name>.memoryMax."; };
+            pressureLimitPercent = mkOption {
+              type = types.ints.between 1 100;
+              default = 60;
+              description = "Same as the NixOS module's oomd.sacrificialSlices.<name>.pressureLimitPercent.";
+            };
+          };
+        });
+        default = { };
+        description = "Same option as the NixOS module's `oomd.sacrificialSlices` -- systemd.slices.<name> is a real, supported system-manager option, so this renders identically.";
+      };
+
+      swapUsedLimitPercent = mkOption {
+        type = types.nullOr (types.ints.between 1 100);
+        default = null;
+        description = ''
+          Same escape hatch as the NixOS module's `oomd.swapUsedLimitPercent`,
+          rendered differently: system-manager has no `systemd.oomd.*` option
+          surface at all (see the file header), so this writes an
+          `oomd.conf.d/` drop-in file instead of a native option.
         '';
       };
 
@@ -220,6 +268,26 @@ in
           no zram-generator module at all). Use the NixOS module
           (`nixosModules.nixram`) for a real zram target, or `mode = "zswap"`
           / `mode = "none"` here.
+        '';
+      }
+      {
+        # Same reserved-name hazard as modules/default.nix: system-manager/oomd.nix
+        # builds `systemd.slices` as a shallow Nix `//` of the sacrificial-slice
+        # attrset with a hardcoded "-"/"user" literal -- a colliding name would be
+        # silently discarded with no error. See modules/default.nix's matching
+        # assertion for the full reasoning.
+        assertion = !(cfg.oomd.sacrificialSlices ? "-")
+          && !(cfg.oomd.sacrificialSlices ? "-.slice")
+          && !(cfg.oomd.sacrificialSlices ? "user")
+          && !(cfg.oomd.sacrificialSlices ? "user.slice");
+        message = ''
+          services.nixram.oomd.sacrificialSlices must not use the reserved
+          names "-" / "-.slice" or "user" / "user.slice" -- those are the
+          two slices this module itself already manages (the box-wide PSI
+          root and user slices). A sacrificialSlices entry with either name
+          would be silently discarded by an internal merge, losing its
+          MemoryHigh/MemoryMax containment with no error. Pick a different
+          slice name for whatever workload you're sacrificing.
         '';
       }
     ];

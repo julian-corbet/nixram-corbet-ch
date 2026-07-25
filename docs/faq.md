@@ -50,7 +50,7 @@ cost. If you run `zram.sizing = "virtual"` alone, you've stepped outside that
 safety net, and the upstream 0.1–0.5 guidance is exactly the caution you
 should be re-applying yourself.
 
-## Why aren't `SwapUsedLimit` / `ManagedOOMSwap` configured anywhere?
+## Why aren't `SwapUsedLimit` / `ManagedOOMSwap` configured by default?
 
 Deliberately, at every level. `SwapUsedLimit` and the per-unit
 `ManagedOOMSwap=kill` opt-in are both swap-used-over-swap-total percentage
@@ -66,14 +66,19 @@ have fired early.
 PSI (pressure stall information) has no such blind spot: stall time is
 medium-agnostic. It doesn't care whether the swap medium is zram, zswap, or a
 disk partition, or how large its nominal capacity is. So on every tier where
-systemd-oomd is armed at all, nixram configures `ManagedOOMMemoryPressure` and
-nothing else — never `SwapUsedLimit` or `ManagedOOMSwap=kill`, on any tier,
-armed or not. (systemd-oomd itself defaults off at 256M, a separate,
+systemd-oomd is armed at all, `ManagedOOMMemoryPressure` is what nixram
+configures BY DEFAULT. (systemd-oomd itself defaults off at 256M, a separate,
 independently-reasoned call about the daemon's own unmeasured RSS cost on the
 smallest tier — [rationale.md \[8\]](rationale.md#8-systemd-oomd-disabled-at-256m)
 — not a partial adoption of the swap-percentage detectors this entry is
-about.) This isn't "keep it as a decorative secondary backstop" — it's not
-configured at all.
+about.)
+
+`SwapUsedLimit` is available as an opt-in escape hatch
+(`oomd.swapUsedLimitPercent`) for a host that understands the blind spot above
+and wants it anyway as a redundant, defense-in-depth signal alongside PSI —
+e.g. migrating an existing incident-tuned config that already relies on it.
+`ManagedOOMSwap=kill` (the PER-UNIT equivalent) has no opt-in anywhere; only
+the box-wide `SwapUsedLimit` does.
 
 ## Why isn't zram+zswap offered as a combination?
 
