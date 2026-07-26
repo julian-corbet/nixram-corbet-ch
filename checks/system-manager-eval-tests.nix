@@ -288,8 +288,22 @@ let
         cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
       "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
 
-    (check "sm-zswap-check/verifies-zpool"
-      (lib.hasInfix "check_param zpool zsmalloc"
+    # zpool must be checked OPTIONALLY, never with the hard `check_param`.
+    # Linux 6.13 removed zbud/z3fold and the `zpool` parameter with them, so a
+    # required check makes mode="zswap" unactivatable on every current kernel
+    # (caught on a live 7.1-cachyos box: no /sys/module/zswap/parameters/zpool).
+    (check "sm-zswap-check/verifies-zpool-optionally"
+      (lib.hasInfix "check_param_optional zpool zsmalloc"
+        cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    (check "sm-zswap-check/zpool-is-not-a-hard-check"
+      (!lib.hasInfix "\n    check_param zpool"
+        cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
+      "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
+
+    (check "sm-zswap-check/missing-module-dir-is-its-own-error"
+      (lib.hasInfix "zswap is not compiled into this kernel"
         cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
       "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
 

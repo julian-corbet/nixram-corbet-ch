@@ -40,11 +40,19 @@ let
     fail=0
     param_path=/sys/module/zswap/parameters
 
+    # "Is zswap compiled in at all" is a property of the DIRECTORY, not of any
+    # one parameter -- ask it once, here, so a per-parameter absence can carry
+    # its own (different) meaning below.
+    if [ ! -d "$param_path" ]; then
+      echo "nixram: $param_path does not exist -- zswap is not compiled into this kernel (CONFIG_ZSWAP=n)." >&2
+      exit 1
+    fi
+
     check_param() {
       name="$1"
       expected="$2"
       if [ ! -e "$param_path/$name" ]; then
-        echo "nixram: $param_path/$name does not exist -- is zswap compiled into this kernel at all (CONFIG_ZSWAP)?" >&2
+        echo "nixram: $param_path/$name does not exist, but zswap IS compiled in -- unexpected kernel parameter layout." >&2
         fail=1
         return
       fi
@@ -55,12 +63,41 @@ let
       fi
     }
 
+    # A parameter that upstream may legitimately have REMOVED. Absent = nothing
+    # to verify, not a failure; present = still verified exactly as before.
+    check_param_optional() {
+      name="$1"
+      expected="$2"
+      if [ ! -e "$param_path/$name" ]; then
+        echo "nixram: zswap.$name not exposed by this kernel -- skipping (see the zpool note in nixram's zswap-boot-params-check.nix)"
+        return
+      fi
+      check_param "$name" "$expected"
+    }
+
     check_param enabled Y
     check_param compressor zstd
-    check_param zpool zsmalloc
+    # zpool is OPTIONAL, and that is not laziness. zbud and z3fold were removed
+    # from zswap upstream in Linux 6.13, leaving zsmalloc as the only backend,
+    # and the `zpool` module parameter was removed with them -- verified on a
+    # live 7.1 CachyOS kernel whose /sys/module/zswap/parameters/ holds exactly
+    # five entries and no `zpool`. Treating that absence as a hard failure made
+    # `mode = "zswap"` UNACTIVATABLE on every current kernel, which is the exact
+    # opposite of this check's purpose. On kernels that do still expose it the
+    # check keeps its full value: there zbud, not zsmalloc, was the compiled-in
+    # default, so an unset zswap.zpool really did mean the wrong allocator.
+    check_param_optional zpool zsmalloc
     check_param max_pool_percent ${toString cfg.zswap.maxPoolPercent}
     check_param accept_threshold_percent ${toString cfg.zswap.acceptThresholdPercent}
     check_param shrinker_enabled ${if cfg.zswap.shrinkerEnabled then "Y" else "N"}
+
+    # Only suggest a cmdline parameter this kernel actually still understands --
+    # telling someone to paste `zswap.zpool=zsmalloc` into a 6.13+ cmdline just
+    # earns them an "Unknown kernel command line parameters" line in dmesg.
+    zpool_param=""
+    if [ -e "$param_path/zpool" ]; then
+      zpool_param=" zswap.zpool=zsmalloc"
+    fi
 
     if [ "$fail" != "0" ]; then
       echo "" >&2
@@ -72,7 +109,7 @@ let
       echo "Add to the kernel command line (e.g. /etc/kernel/cmdline + limine-mkinitcpio, or" >&2
       echo "your bootloader's equivalent) and reboot:" >&2
       echo "" >&2
-      echo "    zswap.enabled=1 zswap.compressor=zstd zswap.zpool=zsmalloc zswap.max_pool_percent=${toString cfg.zswap.maxPoolPercent} zswap.accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent} zswap.shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "1" else "0"}" >&2
+      echo "    zswap.enabled=1 zswap.compressor=zstd''${zpool_param} zswap.max_pool_percent=${toString cfg.zswap.maxPoolPercent} zswap.accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent} zswap.shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "1" else "0"}" >&2
       echo "" >&2
       echo "If those params are already present and this still fails: on CachyOS (and any" >&2
       echo "distro sharing its cachyos-settings package), check for a udev rule that disables" >&2
@@ -82,7 +119,7 @@ let
       exit 1
     fi
 
-    echo "nixram: zswap verified active (compressor=zstd, zpool=zsmalloc, max_pool_percent=${toString cfg.zswap.maxPoolPercent}, accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent}, shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "Y" else "N"})"
+    echo "nixram: zswap verified active (compressor=zstd''${zpool_param:+, zpool=zsmalloc}, max_pool_percent=${toString cfg.zswap.maxPoolPercent}, accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent}, shrinker_enabled=${if cfg.zswap.shrinkerEnabled then "Y" else "N"})"
   '';
 in
 {

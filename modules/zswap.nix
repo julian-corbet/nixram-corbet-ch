@@ -30,6 +30,15 @@ in
       # z3fold/zbud are not offered as options: current kernels' zswap
       # exclusively uses zsmalloc, any zpool selector besides it would
       # be dead configuration. See docs/rationale.md.
+      #
+      # Still PASSED, deliberately, even though Linux 6.13 removed zbud/z3fold
+      # and the `zpool` parameter along with them (an unrecognised parameter is
+      # ignored with a dmesg warning, same as shrinker_enabled below). On the
+      # older kernels where the parameter DOES exist, zbud -- not zsmalloc --
+      # was the compiled-in default, so dropping this line would silently
+      # change the allocator there. The system-manager backend's runtime check
+      # treats the parameter as optional for exactly this reason; see
+      # system-manager/zswap-boot-params-check.nix.
       "zswap.max_pool_percent=${toString cfg.zswap.maxPoolPercent}"
       "zswap.accept_threshold_percent=${toString cfg.zswap.acceptThresholdPercent}"
     ] ++ optional cfg.zswap.shrinkerEnabled "zswap.shrinker_enabled=1";
