@@ -141,10 +141,29 @@ in
     # both worse than the NixOS module's own behavior for the identical
     # option. `//`-merged with the sacrificial slices for the same reason
     # `environment.etc` above is built as one attrset.
-    systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices) // {
-      "-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
-      "user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
-    };
+    # `optionalAttrs cfg.oomd.enable`, NOT `mkIf` on the sliceConfig -- and the
+    # difference is load-bearing on THIS backend specifically, unlike the NixOS
+    # one. `mkIf false` empties an attribute's CONTENTS but still creates the
+    # ATTRIBUTE, so `systemd.slices."-"` / `."user"` stayed declared with an
+    # empty sliceConfig whenever a host set `oomd.enable = false`. NixOS merges
+    # every definition of a given slice into one unit alongside nixpkgs' own,
+    # so an empty extra definition there is a genuine no-op. system-manager
+    # does not merge: it writes one standalone file per declared unit into
+    # /etc/systemd/system/, which OUTRANKS the distro's /usr/lib/systemd/system
+    # copy. The result was a two-line `[Unit]\n\n[Slice]\n` file shadowing the
+    # distro's real user.slice -- silently dropping its Description and, more
+    # importantly, its `Before=slices.target` ordering. Caught before it ever
+    # activated, on a CachyOS host adopting the sysctl layer with
+    # oomd.enable = false (the exact combination the option exists for).
+    #
+    # mkDefault is kept INSIDE, so a host can still override either slice with
+    # a plain assignment when oomd IS enabled -- that escape hatch was itself a
+    # 2026-07-24 review fix and must not regress.
+    systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices)
+      // optionalAttrs cfg.oomd.enable {
+        "-".sliceConfig = mkDefault pressureSliceConfig;
+        "user".sliceConfig = mkDefault pressureSliceConfig;
+      };
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

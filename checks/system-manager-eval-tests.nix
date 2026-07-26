@@ -114,6 +114,18 @@ let
     };
   };
 
+  # Guards the root/user-slice gating fix from OVER-reaching: gating those two
+  # on oomd.enable must not also gate sacrificial slices, which are
+  # unconditional by design (same contract as oomd.units).
+  cfg-oomd-disabled-with-sacrificial-slice = evalFor {
+    services.nixram.level = "24G";
+    services.nixram.oomd.enable = false;
+    services.nixram.oomd.sacrificialSlices."nixram-test-sacrificial" = {
+      memoryHigh = "256M";
+      memoryMax = "320M";
+    };
+  };
+
   results = [
     # --- level-24G-defaults (mode = zswap) --------------------------------
     (check "sm-24G/sysctl-file-sorts-after-distro-defaults"
@@ -252,13 +264,19 @@ let
       "script: ${cfg-override-max-pool.system-manager.preActivationAssertions.nixram-zswap-active.script}")
 
     # --- oomd.enable = false (adopt sysctls, keep an existing oomd setup) ---
-    (check "sm-oomd-disabled/no-root-slice-config"
-      (cfg-oomd-disabled.systemd.slices."-".sliceConfig == { })
-      "got: ${builtins.toJSON cfg-oomd-disabled.systemd.slices."-".sliceConfig}")
+    # NOT DECLARED AT ALL, not merely declared-with-empty-config. On this
+    # backend a declared unit becomes a standalone /etc/systemd/system/ file
+    # that outranks the distro's own copy, so an "empty" -.slice / user.slice
+    # silently shadowed the distro's real one (losing user.slice's
+    # Before=slices.target). `? "-"` is the assertion that actually catches it;
+    # the previous `sliceConfig == { }` form was satisfied BY the bug.
+    (check "sm-oomd-disabled/root-slice-not-declared"
+      (!(cfg-oomd-disabled.systemd.slices ? "-"))
+      "slices: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled.systemd.slices)}")
 
-    (check "sm-oomd-disabled/no-user-slice-config"
-      (cfg-oomd-disabled.systemd.slices."user".sliceConfig == { })
-      "got: ${builtins.toJSON cfg-oomd-disabled.systemd.slices."user".sliceConfig}")
+    (check "sm-oomd-disabled/user-slice-not-declared"
+      (!(cfg-oomd-disabled.systemd.slices ? "user"))
+      "slices: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled.systemd.slices)}")
 
     (check "sm-oomd-disabled/sysctls-still-applied"
       (lib.hasInfix "vm.swappiness = 25" cfg-oomd-disabled.environment.etc."sysctl.d/90-nixram.conf".text)
@@ -384,9 +402,20 @@ let
           cfg-oomd-disabled-with-ladder-unit.environment.etc."systemd/system/nixram-test-disabled-ladder.service.d/nixram-oom-protect.conf".text)
       "text: ${cfg-oomd-disabled-with-ladder-unit.environment.etc."systemd/system/nixram-test-disabled-ladder.service.d/nixram-oom-protect.conf".text}")
 
-    (check "sm-oomd-disabled/root-slice-not-armed-with-ladder-unit-present"
-      (cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig == { })
-      "got: ${builtins.toJSON cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig}")
+    (check "sm-oomd-disabled/root-slice-not-declared-with-ladder-unit-present"
+      (!(cfg-oomd-disabled-with-ladder-unit.systemd.slices ? "-"))
+      "slices: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled-with-ladder-unit.systemd.slices)}")
+
+    # --- sacrificial slices stay unconditional (gating-fix over-reach guard) -
+    (check "sm-oomd-disabled/sacrificial-slice-still-declared"
+      (cfg-oomd-disabled-with-sacrificial-slice.systemd.slices."nixram-test-sacrificial".sliceConfig.MemoryMax == "320M"
+        && cfg-oomd-disabled-with-sacrificial-slice.systemd.slices."nixram-test-sacrificial".sliceConfig.ManagedOOMMemoryPressure == "kill")
+      "slices: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled-with-sacrificial-slice.systemd.slices)}")
+
+    (check "sm-oomd-disabled/sacrificial-slice-does-not-resurrect-root-slice"
+      (!(cfg-oomd-disabled-with-sacrificial-slice.systemd.slices ? "-")
+        && !(cfg-oomd-disabled-with-sacrificial-slice.systemd.slices ? "user"))
+      "slices: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled-with-sacrificial-slice.systemd.slices)}")
   ];
 
   failed = builtins.filter (r: !r.ok) results;
