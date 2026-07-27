@@ -186,8 +186,8 @@ sharing a common design system: **nixarch** (declarative Arch/CachyOS),
 **nixvps** (tiny sub-1GB NixOS VPS profiles),
 [nixremote](https://github.com/julian-corbet/nixremote-corbet-ch)
 (cross-machine native Wayland app forwarding), and
-[nixfish](https://github.com/julian-corbet/nixfish-corbet-ch) (the
-safe-adoption pattern for declarative fish shell config). nixram's own niche
+[nixsh](https://github.com/julian-corbet/nixsh-corbet-ch) (the
+safe-adoption pattern for declarative shell config, across fish, bash and zsh). nixram's own niche
 is purely memory-pressure tuning — usable alongside any of them, or standalone.
 
 ## License
