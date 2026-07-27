@@ -42,6 +42,7 @@ in
 {
   imports = [
     ./zram.nix
+    ./zram-drift.nix
     ./zswap.nix
     ./oomd.nix
     ./sysctls.nix
