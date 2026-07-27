@@ -32,7 +32,7 @@
 { lib, config, ... }:
 
 let
-  cfg = config.services.nixram;
+  cfg = config.nixram;
 
   checkScript = ''
     set -euo pipefail
@@ -101,7 +101,7 @@ let
 
     if [ "$fail" != "0" ]; then
       echo "" >&2
-      echo "nixram: services.nixram.mode = \"zswap\" requires zswap already active with these" >&2
+      echo "nixram: nixram.mode = \"zswap\" requires zswap already active with these" >&2
       echo "values, set via the KERNEL COMMAND LINE -- system-manager cannot set this itself" >&2
       echo "(it never touches the bootloader; this is the one piece of nixram's zswap profile" >&2
       echo "that stays a manual, one-time step, same spirit as 'nix run <flake>#detect-level')." >&2

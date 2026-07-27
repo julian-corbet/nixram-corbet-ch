@@ -827,7 +827,7 @@ large, but the mechanism itself — protect live compute demand on the hot
 path, recover density later when idle — is exactly what these boxes need,
 not a leftover default. The documented alternative for a box running one
 large, non-swap-shaped workload that ISN'T actually compute-bound in the
-sense above is `services.nixram.mode = "none"`, which turns off the whole
+sense above is `nixram.mode = "none"`, which turns off the whole
 zram/zswap layer (not just recompression) and leaves only the oomd and
 sysctl layers running.
 

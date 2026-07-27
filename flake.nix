@@ -59,7 +59,7 @@
           echo "run it on the target machine, then paste the line below into your"
           echo "NixOS configuration and commit it like any other hardware fact."
           echo
-          echo "    services.nixram.level = \"$chosen\";"
+          echo "    nixram.level = \"$chosen\";"
         '';
       };
     in

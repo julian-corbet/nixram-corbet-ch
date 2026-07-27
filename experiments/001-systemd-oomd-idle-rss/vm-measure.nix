@@ -16,7 +16,7 @@ pkgs.testers.nixosTest {
 
   nodes.machine = { config, pkgs, lib, ... }: {
     imports = [ nixramModule ];
-    services.nixram = {
+    nixram = {
       enable = true;
       level = "256M";
       oomd.enable = lib.mkForce true; # override the 256M default (off) to measure the cost being traded away

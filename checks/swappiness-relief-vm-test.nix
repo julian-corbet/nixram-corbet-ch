@@ -190,7 +190,7 @@ pkgs.testers.nixosTest {
 
   nodes.machine = { config, pkgs, lib, ... }: {
     imports = [ nixramModule ];
-    services.nixram = {
+    nixram = {
       enable = true;
       level = "2G";
       zram.swappinessRelief = {

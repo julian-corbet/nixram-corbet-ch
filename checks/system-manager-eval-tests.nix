@@ -26,7 +26,7 @@ let
     (systemManagerLib.makeSystemConfig {
       modules = [
         systemManagerModule
-        { services.nixram.enable = true; }
+        { nixram.enable = true; }
         extraConfig
         { nixpkgs.hostPlatform = "x86_64-linux"; }
       ];
@@ -36,17 +36,17 @@ let
 
   check = name: ok: detail: { inherit name ok detail; };
 
-  cfg-24G = evalFor { services.nixram.level = "24G"; };
-  cfg-mode-none = evalFor { services.nixram.level = "24G"; services.nixram.mode = "none"; };
+  cfg-24G = evalFor { nixram.level = "24G"; };
+  cfg-mode-none = evalFor { nixram.level = "24G"; nixram.mode = "none"; };
   cfg-override-max-pool = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.zswap.maxPoolPercent = 40;
+    nixram.level = "24G";
+    nixram.zswap.maxPoolPercent = 40;
   };
   # A host adopting nixram's sysctls while keeping its OWN existing,
   # differently-shaped oomd setup for now (e.g. the reference laptop's first rollout).
   cfg-oomd-disabled = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.oomd.enable = false;
+    nixram.level = "24G";
+    nixram.oomd.enable = false;
   };
 
   # Proves the missing-mkDefault regression (found by review 2026-07-24,
@@ -56,7 +56,7 @@ let
   # (override-wins/user-slice-plain-override-no-mkforce-needed) already
   # proves for the NixOS backend.
   cfg-override-user-slice = evalFor {
-    services.nixram.level = "24G";
+    nixram.level = "24G";
     systemd.slices."user".sliceConfig = { };
   };
 
@@ -64,8 +64,8 @@ let
   # 2026-07-24: only 3 of 6 documented parameters were ever verified,
   # fixed in system-manager/zswap-boot-params-check.nix) stays fixed.
   cfg-override-accept-threshold = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.zswap.acceptThresholdPercent = 70;
+    nixram.level = "24G";
+    nixram.zswap.acceptThresholdPercent = 70;
   };
 
   # The full richer per-unit ladder (memory ladder + restart resilience) +
@@ -73,8 +73,8 @@ let
   # whole ladder" redesign, mirrored from checks/default.nix's NixOS-side
   # cfg-override-oomd-ladder.
   cfg-override-oomd-ladder = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.oomd.units."nixram-test-ladder.service" = {
+    nixram.level = "24G";
+    nixram.oomd.units."nixram-test-ladder.service" = {
       memoryMin = "24M";
       memoryLow = "40M";
       memoryHigh = "80M";
@@ -83,20 +83,20 @@ let
       managedOOMPreference = "avoid";
       restartSec = "2s";
     };
-    services.nixram.oomd.sacrificialSlices."nixram-test-sacrifice" = {
+    nixram.oomd.sacrificialSlices."nixram-test-sacrifice" = {
       memoryHigh = "256M";
       memoryMax = "320M";
       pressureLimitPercent = 60;
     };
-    services.nixram.oomd.swapUsedLimitPercent = 90;
+    nixram.oomd.swapUsedLimitPercent = 90;
   };
 
   # The fully-degenerate case, mirrored from checks/default.nix's
   # cfg-override-oomd-all-null: every field explicitly opted out, including
   # the two that otherwise default non-null.
   cfg-override-oomd-all-null = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.oomd.units."nixram-test-all-null.service" = {
+    nixram.level = "24G";
+    nixram.oomd.units."nixram-test-all-null.service" = {
       oomScoreAdjust = null;
       managedOOMPreference = null;
     };
@@ -106,9 +106,9 @@ let
   # ladder / restartSec branches, mirrored from checks/default.nix's
   # cfg-oomd-disabled-with-ladder-unit.
   cfg-oomd-disabled-with-ladder-unit = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.oomd.enable = false;
-    services.nixram.oomd.units."nixram-test-disabled-ladder.service" = {
+    nixram.level = "24G";
+    nixram.oomd.enable = false;
+    nixram.oomd.units."nixram-test-disabled-ladder.service" = {
       memoryMin = "24M";
       restartSec = "2s";
     };
@@ -118,9 +118,9 @@ let
   # on oomd.enable must not also gate sacrificial slices, which are
   # unconditional by design (same contract as oomd.units).
   cfg-oomd-disabled-with-sacrificial-slice = evalFor {
-    services.nixram.level = "24G";
-    services.nixram.oomd.enable = false;
-    services.nixram.oomd.sacrificialSlices."nixram-test-sacrificial" = {
+    nixram.level = "24G";
+    nixram.oomd.enable = false;
+    nixram.oomd.sacrificialSlices."nixram-test-sacrificial" = {
       memoryHigh = "256M";
       memoryMax = "320M";
     };
@@ -212,12 +212,12 @@ let
     # See the `evalFails` comment above -- makeSystemConfig throws outright
     # rather than leaving an inspectable assertions list.
     (check "sm-level-unset/eval-fails"
-      (evalFails { services.nixram.level = null; })
+      (evalFails { nixram.level = null; })
       "expected evaluation to fail (level unset) but it succeeded")
 
     # --- mode-zram-rejected -------------------------------------------------
     (check "sm-mode-zram/eval-fails"
-      (evalFails { services.nixram.level = "24G"; services.nixram.mode = "zram"; })
+      (evalFails { nixram.level = "24G"; nixram.mode = "zram"; })
       "expected evaluation to fail (mode = zram unsupported here) but it succeeded")
 
     # --- reserved-name collisions (2026-07-25 adversarial review) ----------
@@ -227,15 +227,15 @@ let
     # system-manager/oomd.nix, no error at all.
     (check "sm-sacrificial-slice-reserved-name-dash/eval-fails"
       (evalFails {
-        services.nixram.level = "24G";
-        services.nixram.oomd.sacrificialSlices."-" = { memoryHigh = "1G"; memoryMax = "2G"; };
+        nixram.level = "24G";
+        nixram.oomd.sacrificialSlices."-" = { memoryHigh = "1G"; memoryMax = "2G"; };
       })
       "expected evaluation to fail (sacrificialSlices named \"-\" collides with the root slice) but it succeeded")
 
     (check "sm-sacrificial-slice-reserved-name-user/eval-fails"
       (evalFails {
-        services.nixram.level = "24G";
-        services.nixram.oomd.sacrificialSlices."user" = { memoryHigh = "1G"; memoryMax = "2G"; };
+        nixram.level = "24G";
+        nixram.oomd.sacrificialSlices."user" = { memoryHigh = "1G"; memoryMax = "2G"; };
       })
       "expected evaluation to fail (sacrificialSlices named \"user\" collides with the user slice) but it succeeded")
 

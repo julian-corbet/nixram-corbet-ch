@@ -23,7 +23,7 @@ let
       system = "x86_64-linux";
       modules = [
         nixramModule
-        { services.nixram.enable = true; }
+        { nixram.enable = true; }
         extraConfig
         {
           boot.loader.grub.enable = false;
@@ -47,31 +47,31 @@ let
   # forcing it is never a surprise.
   check = name: ok: detail: { inherit name ok detail; };
 
-  cfg-4G = evalFor { services.nixram.level = "4G"; };
-  cfg-256M = evalFor { services.nixram.level = "256M"; };
-  cfg-1G = evalFor { services.nixram.level = "1G"; };
-  cfg-128G = evalFor { services.nixram.level = "128G"; };
+  cfg-4G = evalFor { nixram.level = "4G"; };
+  cfg-256M = evalFor { nixram.level = "256M"; };
+  cfg-1G = evalFor { nixram.level = "1G"; };
+  cfg-128G = evalFor { nixram.level = "128G"; };
   cfg-sizing-virtual = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.sizing = "virtual";
+    nixram.level = "4G";
+    nixram.zram.sizing = "virtual";
   };
   cfg-sizing-physical = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.sizing = "physical";
+    nixram.level = "4G";
+    nixram.zram.sizing = "physical";
   };
   cfg-mode-zswap = evalFor {
-    services.nixram.level = "16G";
-    services.nixram.mode = "zswap";
+    nixram.level = "16G";
+    nixram.mode = "zswap";
     swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
   };
-  cfg-level-unset = evalFor { services.nixram.level = null; };
+  cfg-level-unset = evalFor { nixram.level = null; };
   cfg-mode-none = evalFor {
-    services.nixram.level = "64G";
-    services.nixram.mode = "none";
+    nixram.level = "64G";
+    nixram.mode = "none";
   };
   cfg-override = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.diskSizeOverride = "ram / 4";
+    nixram.level = "4G";
+    nixram.zram.diskSizeOverride = "ram / 4";
   };
   # Proves the mkDefault fix on "-.slice"/"user.slice" actually works: a
   # host can override just ONE slice with a plain assignment (no
@@ -80,53 +80,53 @@ let
   # incident-tuned oomd config (root slice at a custom percentage, user
   # slice deliberately left unarmed) on top of nixram.
   cfg-override-user-slice = evalFor {
-    services.nixram.level = "4G";
+    nixram.level = "4G";
     systemd.slices."user".sliceConfig = { };
   };
 
   # The remaining zram escape hatches -- diskSizeOverride is covered by
   # cfg-override above, these four were never exercised by any check.
   cfg-override-resident-limit = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.residentLimitOverride = "ram / 8";
+    nixram.level = "4G";
+    nixram.zram.residentLimitOverride = "ram / 8";
   };
   cfg-override-priority = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.priorityOverride = 50;
+    nixram.level = "4G";
+    nixram.zram.priorityOverride = 50;
   };
   cfg-override-recompression-algorithm = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.recompressionAlgorithmOverride = "zstd(level=12)";
+    nixram.level = "4G";
+    nixram.zram.recompressionAlgorithmOverride = "zstd(level=12)";
   };
   cfg-override-compression-algorithm = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.zram.compressionAlgorithmOverride = "lzo-rle";
+    nixram.level = "4G";
+    nixram.zram.compressionAlgorithmOverride = "lzo-rle";
   };
 
   # zswap's own overrides (acceptThresholdPercent/shrinkerEnabled/diskMedium)
   # and oomd's (units/minFreeKbytesOverride/pressureDiagnostics) -- none of
   # these were ever set away from their defaults by any check.
   cfg-override-zswap = evalFor {
-    services.nixram.level = "16G";
-    services.nixram.mode = "zswap";
+    nixram.level = "16G";
+    nixram.mode = "zswap";
     swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
-    services.nixram.zswap.acceptThresholdPercent = 70;
-    services.nixram.zswap.shrinkerEnabled = false;
-    services.nixram.zswap.diskMedium = "hdd";
+    nixram.zswap.acceptThresholdPercent = 70;
+    nixram.zswap.shrinkerEnabled = false;
+    nixram.zswap.diskMedium = "hdd";
   };
   cfg-override-oomd = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.oomd.units."nixram-test-example.service" = { };
-    services.nixram.oomd.pressureDiagnostics.enable = true;
-    services.nixram.minFreeKbytesOverride = 65536;
+    nixram.level = "4G";
+    nixram.oomd.units."nixram-test-example.service" = { };
+    nixram.oomd.pressureDiagnostics.enable = true;
+    nixram.minFreeKbytesOverride = 65536;
   };
 
   # The full richer per-unit ladder (memory ladder + restart resilience) --
   # nothing exercises a non-default oomd.units entry, or sacrificialSlices,
   # or swapUsedLimitPercent, without this.
   cfg-override-oomd-ladder = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.oomd.units."nixram-test-ladder.service" = {
+    nixram.level = "4G";
+    nixram.oomd.units."nixram-test-ladder.service" = {
       memoryMin = "24M";
       memoryLow = "40M";
       memoryHigh = "80M";
@@ -135,12 +135,12 @@ let
       managedOOMPreference = "avoid";
       restartSec = "2s";
     };
-    services.nixram.oomd.sacrificialSlices."nixram-test-sacrifice" = {
+    nixram.oomd.sacrificialSlices."nixram-test-sacrifice" = {
       memoryHigh = "256M";
       memoryMax = "320M";
       pressureLimitPercent = 60;
     };
-    services.nixram.oomd.swapUsedLimitPercent = 90;
+    nixram.oomd.swapUsedLimitPercent = 90;
   };
 
   # The fully-degenerate case: every field explicitly opted out, including
@@ -150,8 +150,8 @@ let
   # defaults (cfg-override-oomd, the implicit sshd default) or set every
   # field to a non-null value (cfg-override-oomd-ladder).
   cfg-override-oomd-all-null = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.oomd.units."nixram-test-all-null.service" = {
+    nixram.level = "4G";
+    nixram.oomd.units."nixram-test-all-null.service" = {
       oomScoreAdjust = null;
       managedOOMPreference = null;
     };
@@ -162,9 +162,9 @@ let
   # just the trivial score/preference-only default unit every other
   # oomd.enable=false fixture exercises.
   cfg-oomd-disabled-with-ladder-unit = evalFor {
-    services.nixram.level = "4G";
-    services.nixram.oomd.enable = false;
-    services.nixram.oomd.units."nixram-test-disabled-ladder.service" = {
+    nixram.level = "4G";
+    nixram.oomd.enable = false;
+    nixram.oomd.units."nixram-test-disabled-ladder.service" = {
       memoryMin = "24M";
       restartSec = "2s";
     };
@@ -182,7 +182,7 @@ let
   # place that gives every level, including any added later, coverage by
   # construction rather than by remembering to add another cfg-<level>.
   cfg-by-level = builtins.listToAttrs (map
-    (name: { inherit name; value = evalFor { services.nixram.level = name; }; })
+    (name: { inherit name; value = evalFor { nixram.level = name; }; })
     levelsData.levelNames);
 
   levelMatrixChecks = lib.concatMap
@@ -530,23 +530,23 @@ let
     # path, the same way a real `nixos-rebuild`/`nix build .#nixosConfigurations.<host>`
     # would.
     (check "level-unset-assertion/toplevel-build-actually-fails"
-      (evalFailsBuild { services.nixram.level = null; })
+      (evalFailsBuild { nixram.level = null; })
       "expected forcing system.build.toplevel to fail for level=null, but it succeeded")
 
     # --- new-assertions (2026-07-24 review) --------------------------------
     (check "recompression-timer-requires-algorithm/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "256M";
-        services.nixram.zram.recompressionTimer.enable = true;
+        nixram.level = "256M";
+        nixram.zram.recompressionTimer.enable = true;
       })
       "expected forcing system.build.toplevel to fail (256M has recompressionAlgorithm=null) but it succeeded")
 
     (check "zram-override-wrong-mode/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "16G";
-        services.nixram.mode = "zswap";
+        nixram.level = "16G";
+        nixram.mode = "zswap";
         swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
-        services.nixram.zram.diskSizeOverride = "ram / 4";
+        nixram.zram.diskSizeOverride = "ram / 4";
       })
       "expected forcing system.build.toplevel to fail (zram override set while mode=zswap) but it succeeded")
 
@@ -556,29 +556,29 @@ let
     # -- no error at all. Now a hard eval-time failure instead.
     (check "sacrificial-slice-reserved-name-dash/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "4G";
-        services.nixram.oomd.sacrificialSlices."-" = { memoryHigh = "1G"; memoryMax = "2G"; };
+        nixram.level = "4G";
+        nixram.oomd.sacrificialSlices."-" = { memoryHigh = "1G"; memoryMax = "2G"; };
       })
       "expected forcing system.build.toplevel to fail (sacrificialSlices named \"-\" collides with the root slice) but it succeeded")
 
     (check "sacrificial-slice-reserved-name-user/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "4G";
-        services.nixram.oomd.sacrificialSlices."user" = { memoryHigh = "1G"; memoryMax = "2G"; };
+        nixram.level = "4G";
+        nixram.oomd.sacrificialSlices."user" = { memoryHigh = "1G"; memoryMax = "2G"; };
       })
       "expected forcing system.build.toplevel to fail (sacrificialSlices named \"user\" collides with the user slice) but it succeeded")
 
     (check "sacrificial-slice-reserved-name-user-slice-suffix/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "4G";
-        services.nixram.oomd.sacrificialSlices."user.slice" = { memoryHigh = "1G"; memoryMax = "2G"; };
+        nixram.level = "4G";
+        nixram.oomd.sacrificialSlices."user.slice" = { memoryHigh = "1G"; memoryMax = "2G"; };
       })
       "expected forcing system.build.toplevel to fail (sacrificialSlices named \"user.slice\" normalizes to the reserved \"user\" key) but it succeeded")
 
     (check "oomd-unit-reserved-name-diagnostics/eval-fails"
       (evalFailsBuild {
-        services.nixram.level = "4G";
-        services.nixram.oomd.units."nixram-pressure-diagnostics" = { memoryMax = "200M"; };
+        nixram.level = "4G";
+        nixram.oomd.units."nixram-pressure-diagnostics" = { memoryMax = "200M"; };
       })
       "expected forcing system.build.toplevel to fail (oomd.units named \"nixram-pressure-diagnostics\" collides with nixram's own diagnostics service) but it succeeded")
 

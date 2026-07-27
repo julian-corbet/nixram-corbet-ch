@@ -2,13 +2,13 @@
 #
 # zswap is a compressed CACHE in front of a real disk-backed swap
 # device, not a swap device itself -- structurally different from zram
-# (see docs/faq.md). `services.nixram.mode = "zswap"` is for
+# (see docs/faq.md). `nixram.mode = "zswap"` is for
 # laptops/desktops that already have `swapDevices`; the assertion that
 # enforces this lives in modules/default.nix.
 #
 # WIRING CAVEAT, STATED PLAINLY: zswap.enabled is a kernel boot
 # parameter, off by default upstream. Setting
-# `services.nixram.mode = "zswap"` only takes effect on the NEXT BOOT --
+# `nixram.mode = "zswap"` only takes effect on the NEXT BOOT --
 # `nixos-rebuild switch` alone does not retroactively enable zswap on an
 # already-running kernel. This is a real limitation of going through
 # `boot.kernelParams`, not a nixram shortcut; document it to users, don't
@@ -19,7 +19,7 @@
 with lib;
 
 let
-  cfg = config.services.nixram;
+  cfg = config.nixram;
 in
 {
   config = mkIf (cfg.enable && cfg.mode == "zswap") {

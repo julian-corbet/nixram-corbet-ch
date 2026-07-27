@@ -10,7 +10,7 @@ Nix evaluation is pure and static: it cannot read a target machine's live
 `/proc/meminfo`. A config that silently guessed a RAM level at eval time
 would trade a wrong OOM/swap policy for the appearance of convenience —
 exactly the kind of footgun nixram's whole level-anchor design exists to
-avoid. So `services.nixram.level` defaults to `null`, and leaving it unset is
+avoid. So `nixram.level` defaults to `null`, and leaving it unset is
 a hard evaluation error (an `assertions` entry with a message pointing back
 here), not a silent fallback.
 
@@ -22,7 +22,7 @@ nix run <flake>#detect-level
 
 Run it *on the target machine*. It reads real `/proc/meminfo`, rounds up to
 the nearest anchor, and prints a ready-to-paste
-`services.nixram.level = "...";` line. You paste that into your
+`nixram.level = "...";` line. You paste that into your
 configuration and commit it like any other hardware fact.
 
 This is "detect once, paste once" — a manual step you commit, not an
@@ -86,7 +86,7 @@ Because it would mean double compression for no sourced benefit: a page
 would get compressed once into the zswap pool, then compressed again
 (effectively) once it lands in zram-backed swap space, or vice versa,
 depending on stacking order. Nothing in the sources this project reviewed
-recommends running both at once. `services.nixram.mode` is an enum —
+recommends running both at once. `nixram.mode` is an enum —
 `"zram"`, `"zswap"`, or `"none"` — precisely so this combination can't be
 expressed by accident.
 
@@ -104,7 +104,7 @@ simply won't be preferred until zram is exhausted.
 Two things worth knowing before you flip the switch:
 
 1. **It requires a real swap device.** zswap is a compressed cache in front
-   of disk-backed swap, not a swap device itself. `services.nixram.mode =
+   of disk-backed swap, not a swap device itself. `nixram.mode =
    "zswap"` asserts that `config.swapDevices` is non-empty; without a real
    backing swap device, `zswap.enabled=1` is inert.
 2. **It only takes effect on the next boot.** `zswap.enabled` and its

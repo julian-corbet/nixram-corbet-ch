@@ -3,7 +3,7 @@
 nixram is one small NixOS module: declare a RAM level, get coherent
 zram/zswap, systemd-oomd, and `vm.*` sysctl tuning derived from it. Instead
 of hand-picking a dozen loosely-related knobs and hoping they agree with each
-other, you set `services.nixram.level` once and the rest follows from a
+other, you set `nixram.level` once and the rest follows from a
 single table (`levels.nix`).
 
 ## Who it's for
@@ -63,7 +63,7 @@ Two distinct audiences, one module:
 }
 # in your nixosSystem modules:
 imports = [ inputs.nixram.nixosModules.nixram ];
-services.nixram = {
+nixram = {
   enable = true;
   level = "4G";  # find yours: nix run github:julian-corbet/nixram-corbet-ch#detect-level
 };

@@ -24,7 +24,7 @@ default, so nothing here is presented as more settled than it actually is.
 }
 # in your nixosSystem modules:
 imports = [ inputs.nixram.nixosModules.nixram ];
-services.nixram = {
+nixram = {
   enable = true;
   level = "4G";  # find yours: nix run github:julian-corbet/nixram-corbet-ch#detect-level
 };
@@ -35,7 +35,7 @@ There's no default level and no eval-time auto-detection by design — see
 
 ## Options
 
-`services.nixram.*`:
+`nixram.*`:
 
 - `enable` — turn the module on.
 - `level` — one of the fourteen anchor levels (`256M` … `128G`); no default,
@@ -113,14 +113,14 @@ of a NixOS rebuild), import `systemManagerModules.nixram` instead:
 }
 # in your system-manager modules:
 imports = [ inputs.nixram.systemManagerModules.nixram ];
-services.nixram = {
+nixram = {
   enable = true;
   level = "24G";
   mode = "zswap"; # the only mode this backend supports besides "none"
 };
 ```
 
-Same `services.nixram.*` option names and level table, rendered onto
+Same `nixram.*` option names and level table, rendered onto
 system-manager's smaller, real option surface instead of NixOS's:
 
 - `mode = "zram"` is **not supported** here — it needs
@@ -137,7 +137,7 @@ system-manager's smaller, real option surface instead of NixOS's:
   (`systemd.slices` renders through the identical code NixOS itself uses);
   toggling whether the `systemd-oomd` **daemon** runs at all isn't
   manageable here, and is assumed already on via the distro's own defaults.
-  `services.nixram.oomd.enable = false` skips just the slice-arming step
+  `nixram.oomd.enable = false` skips just the slice-arming step
   (protected-unit `OOMScoreAdjust` still applies) — the intended way to
   adopt nixram's sysctls on a host that already has its own, differently-
   shaped oomd setup (per-app slices, a different root-slice threshold)

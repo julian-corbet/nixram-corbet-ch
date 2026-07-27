@@ -81,12 +81,12 @@ This is a 'detect once, paste once' tool, not a live auto-detector:
 run it on the target machine, then paste the line below into your
 NixOS configuration and commit it like any other hardware fact.
 
-    services.nixram.level = "4G";</span>
+    nixram.level = "4G";</span>
 
 <span class="prompt">$</span> $EDITOR configuration.nix
 <span class="output">  imports = [ inputs.nixram.nixosModules.nixram ];
 
-  services.nixram = {
+  nixram = {
     enable = true;
     level = "4G";
   };</span>
@@ -365,7 +365,7 @@ NixOS configuration and commit it like any other hardware fact.
         <h3>3. Import and declare</h3>
         <pre><code>imports = [ inputs.nixram.nixosModules.nixram ];
 
-services.nixram = {
+nixram = {
   enable = true;
   level = "4G";
 };</code></pre>

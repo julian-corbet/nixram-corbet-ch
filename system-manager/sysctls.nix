@@ -38,7 +38,7 @@
 with lib;
 
 let
-  cfg = config.services.nixram;
+  cfg = config.nixram;
   levelsData = import ../levels.nix;
   inherit (levelsData) levelNames levels;
 

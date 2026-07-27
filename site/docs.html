@@ -193,7 +193,7 @@
   <p><strong>3. Import the module and declare the level.</strong></p>
   <pre><code>imports = [ inputs.nixram.nixosModules.nixram ];
 
-services.nixram = {
+nixram = {
   enable = true;
   level = "4G";
 };</code></pre>
@@ -201,7 +201,7 @@ services.nixram = {
   <p>That is the whole configuration. There is no build-time detection and no default level: Nix builds cannot read the target machine's live memory, so the level is a fact you detect once and commit, like a disk UUID. Enabling the module without a level is a hard build error with a message pointing at the fix.</p>
 
   <p><strong>On a laptop with a swap partition you keep</strong>, or one that hibernates to it, add the zswap mode instead. It needs at least one entry in <code>swapDevices</code>, and it takes effect on the next boot rather than on rebuild.</p>
-  <pre><code>services.nixram = {
+  <pre><code>nixram = {
   enable = true;
   level = "16G";
   mode = "zswap";
@@ -601,7 +601,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
 <!-- OPTIONS -->
 <div class="docs-section" id="options">
   <h2>Option reference</h2>
-  <p>All under <code>services.nixram.</code></p>
+  <p>All under <code>nixram.</code></p>
 
   <div class="table-scroll">
     <table class="level-table wide-table">
