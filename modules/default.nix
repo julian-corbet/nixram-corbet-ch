@@ -428,6 +428,80 @@ in
       '';
     };
 
+    sysctls.reapplyBridge.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Re-apply sysctl.d after systemd-sysctl, as insurance against a systemd-sysctl regression
+        that exits 0 while applying NOTHING.
+
+        WHY THIS EXISTS. systemd 260.1 shipped a systemd-sysctl that silently no-ops: exit 0, no
+        warning, sysctls simply not applied. Fixed in 261, but the failure mode is the dangerous
+        kind -- a box reports a clean activation and runs kernel defaults, and nothing surfaces
+        the difference until something else goes wrong. Migrated into this module from a real
+        fleet host that hit it and carried a hand-written workaround since.
+
+        Two details are load-bearing, both learned the hard way:
+
+          Every ExecStart is `-` prefixed. Best-effort re-application must NEVER fail the unit --
+          a failed unit makes switch-to-configuration exit non-zero, which deploy-rs autoRollback
+          reads as a failed deploy and reverts the ENTIRE closure. On a live mail host that turns
+          a cosmetic sysctl problem into an outage.
+
+          systemd's own shipped defaults are applied first, explicitly. `sysctl --system` reads
+          /etc, /run and /usr/lib only; on NixOS systemd's 50-default.conf lives in the store,
+          outside all three, so a plain `--system` would silently drop fs.protected_*,
+          kernel.kptr_restrict and friends.
+
+        Off by default: it is insurance against a version-specific bug, and on a fixed systemd it
+        is a harmless idempotent no-op rather than something every host should carry unasked.
+      '';
+    };
+
+    oomd.monitorSystemSlice = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Also arm `system.slice` with this level's PSI values, alongside the root and user slices
+        this module already configures.
+
+        OFF by default because on a general-purpose box `-.slice` already covers system.slice as a
+        descendant, and arming both means two cgroups competing to kill the same victim. It earns
+        its keep on a SERVICE box -- one where every workload that matters is a systemd unit and
+        there is no interactive load -- because scoping the kill decision to system.slice picks the
+        worst SERVICE rather than the worst cgroup anywhere on the machine.
+
+        Deliberately not `systemd.oomd.enableSystemSlice`: that helper hardcodes an 80% pressure
+        limit with no duration control, which cannot express this module's per-level PSI values.
+        Same reasoning as the root/user slices above.
+      '';
+    };
+
+    oomd.defaultMemoryPressureLimitPercent = mkOption {
+      type = types.nullOr (types.ints.between 1 100);
+      default = null;
+      description = ''
+        Daemon-wide `DefaultMemoryPressureLimit` in oomd.conf's [OOM] section, or null to leave
+        systemd's own compiled-in default alone.
+
+        This is the fallback for any cgroup that does NOT carry an explicit
+        `ManagedOOMMemoryPressureLimit` of its own -- distinct from the per-slice values this
+        module sets, which always win where they apply. Setting it is how a host expresses "and
+        everything I have not spoken about specifically should behave like this too".
+      '';
+    };
+
+    oomd.defaultMemoryPressureDurationSec = mkOption {
+      type = types.nullOr types.ints.positive;
+      default = null;
+      description = ''
+        Daemon-wide `DefaultMemoryPressureDurationSec`, or null for systemd's own default.
+
+        Pairs with `defaultMemoryPressureLimitPercent`: a limit without a duration reacts to
+        instantaneous spikes, which on a small box is mostly noise. Set both or neither.
+      '';
+    };
+
     oomd.swapUsedLimitPercent = mkOption {
       type = types.nullOr (types.ints.between 1 100);
       default = null;

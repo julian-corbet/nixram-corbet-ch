@@ -200,14 +200,34 @@ in
     systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices) // {
       "-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
       "user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+      # system.slice: opt-in, because on a general-purpose box `-.slice` already covers it as a
+      # descendant and arming both makes two cgroups race to kill the same victim. On a SERVICE
+      # box -- every workload a unit, no interactive load -- scoping to system.slice is what makes
+      # oomd pick the worst SERVICE rather than the worst cgroup anywhere on the machine.
+      "system".sliceConfig =
+        mkIf (cfg.oomd.enable && cfg.oomd.monitorSystemSlice) (mkDefault pressureSliceConfig);
     };
 
     # SwapUsedLimit: OFF unless a host opts in -- see the option's own doc
     # comment (modules/default.nix) and docs/faq.md for the blind-spot
     # reasoning this module otherwise deliberately avoids it for.
-    systemd.oomd.settings.OOM = mkIf (cfg.oomd.swapUsedLimitPercent != null) {
-      SwapUsedLimit = mkDefault "${toString cfg.oomd.swapUsedLimitPercent}%";
-    };
+    # One [OOM] section, three independently-optional keys. mkMerge rather than a single attrset
+    # so a host can set any of them alone: SwapUsedLimit without daemon defaults is the common
+    # case, and daemon defaults without SwapUsedLimit is what a box wants when it distrusts the
+    # swap signal but still needs a floor for cgroups it has not named individually.
+    systemd.oomd.settings.OOM = mkMerge [
+      (mkIf (cfg.oomd.swapUsedLimitPercent != null) {
+        SwapUsedLimit = mkDefault "${toString cfg.oomd.swapUsedLimitPercent}%";
+      })
+      (mkIf (cfg.oomd.defaultMemoryPressureLimitPercent != null) {
+        DefaultMemoryPressureLimit =
+          mkDefault "${toString cfg.oomd.defaultMemoryPressureLimitPercent}%";
+      })
+      (mkIf (cfg.oomd.defaultMemoryPressureDurationSec != null) {
+        DefaultMemoryPressureDurationSec =
+          mkDefault "${toString cfg.oomd.defaultMemoryPressureDurationSec}s";
+      })
+    ];
 
     systemd.timers.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "Timer for nixram PSI pressure diagnostic snapshot";

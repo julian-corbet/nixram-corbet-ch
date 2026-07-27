@@ -37,7 +37,7 @@
 # culting a number that does nothing under this project's own overcommit
 # stance; nixram has no `overcommit_memory=2` use case anywhere.
 
-{ lib, config, ... }:
+{ lib, pkgs, config, ... }:
 
 with lib;
 
@@ -158,6 +158,30 @@ let
 in
 {
   config = mkIf (cfg.enable && cfg.sysctls.enable) {
+    # See sysctls.reapplyBridge.enable's own description for the systemd-sysctl regression this
+    # guards against and why both ExecStarts are `-` prefixed. Migrated here from a fleet host
+    # that hit the bug: a workaround one machine carries privately is a workaround every machine
+    # running this module is one systemd bump away from needing.
+    systemd.services.nixram-sysctl-reapply = mkIf cfg.sysctls.reapplyBridge.enable {
+      description = "nixram: re-apply sysctl.d (systemd-sysctl no-op regression workaround)";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "systemd-sysctl.service" ];
+      # Re-fire on switch whenever the sysctl set changes. systemd-sysctl carries the same
+      # trigger, but it is the unit that no-ops -- this is the one that must actually re-run.
+      restartTriggers = [ config.environment.etc."sysctl.d/60-nixos.conf".source ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = [
+          # systemd's own shipped defaults FIRST: `sysctl --system` reads /etc, /run and /usr/lib
+          # only, and on NixOS systemd's 50-default.conf lives in the store, outside all three.
+          "-${pkgs.procps}/bin/sysctl -e -p ${config.systemd.package}/example/sysctl.d/50-default.conf"
+          # then the configured set, which overrides where both define the same key.
+          "-${pkgs.procps}/bin/sysctl -e --system"
+        ];
+      };
+    };
+
     boot.kernel.sysctl = mkMerge [
       {
         "vm.watermark_boost_factor" = mkDefault activeLevel.watermarkBoostFactor;
