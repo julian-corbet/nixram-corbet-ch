@@ -42,14 +42,18 @@ let
   parseExpr = expr: ''
     parse_expr() {
       # $1: the expression. Echoes bytes, or "?" if the shape is not one we can evaluate here.
-      local e="''${1// /}" ram_kb ram
+      # COMPUTE IN WHOLE MiB, the way zram-generator itself does -- its own conf.example says
+      # these expressions are "as a function of MemTotal, both in MB". Doing the arithmetic in
+      # bytes and comparing exactly produces a false positive on every host: on a 125 GiB box the
+      # byte-exact answer misses the generator's MiB-truncated one by ~345 KB.
+      local e="''${1// /}" ram_kb ram_mib
       read -r _ ram_kb _ < /proc/meminfo
-      ram=$(( ram_kb * 1024 ))
+      ram_mib=$(( ram_kb / 1024 ))
       case "$e" in
-        ram) echo "$ram" ;;
+        ram) echo $(( ram_mib * 1048576 )) ;;
         ram\*[0-9]*/[0-9]*)
           local n="''${e#ram\*}"; local num="''${n%%/*}"; local den="''${n##*/}"
-          echo $(( ram * num / den )) ;;
+          echo $(( (ram_mib * num / den) * 1048576 )) ;;
         *) echo "?" ;;
       esac
     }
@@ -107,7 +111,11 @@ in
             echo "nixram-zram-drift: cannot verify size -- unrecognised expression ${declaredSize}." >&2
             echo "  live disksize is $actual bytes; check it by hand." >&2
             drift=1
-          elif [ "$actual" != "$expected" ]; then
+          # 2 MiB of slack: the generator truncates to whole MiB and the kernel page-aligns what
+          # it is given, so the live value is near the declared one but rarely equal to the byte.
+          # Anything inside this window is the same intent; anything outside is real drift (the
+          # case that motivated this module was off by a factor of nearly four).
+          elif [ "$expected" != "0" ] && { [ $(( actual > expected ? actual - expected : expected - actual )) -gt 2097152 ]; }; then
             echo "nixram-zram-drift: DISKSIZE MISMATCH" >&2
             echo "  declared ${declaredSize} = $expected bytes" >&2
             echo "  live                     $actual bytes" >&2
@@ -116,10 +124,19 @@ in
         '')}
 
         ${lib.optionalString (declaredResident != null) ''
-          lim=$(cat "$dev/mem_limit" 2>/dev/null || echo "")
+          # READ IT FROM mm_stat, NOT FROM mem_limit. /sys/block/zram0/mem_limit is mode 0200 --
+          # write-only -- so `cat` yields nothing on every host, and a check reading it would
+          # report "not applied" universally. mm_stat's 4th field is the same value, readable.
+          # (Found the hard way: the first version of this check did read mem_limit, and a
+          # hand-built fake sysfs with a readable file hid the bug that a real box exposed in
+          # one command.)
+          lim=$(awk '{print $4}' "$dev/mm_stat" 2>/dev/null || echo "")
+          # Presence, not exactness: the kernel page-aligns this one and the arithmetic path
+          # differs from disksize's, so a byte comparison is not meaningful. What matters is
+          # whether a limit exists at all -- 0 means "no limit", which is the failure mode.
           if [ -z "$lim" ] || [ "$lim" = "0" ]; then
             echo "nixram-zram-drift: RESIDENT LIMIT NOT APPLIED" >&2
-            echo "  declared zram-resident-limit ${declaredResident}, live mem_limit is ''${lim:-unset}" >&2
+            echo "  declared zram-resident-limit ${declaredResident}, live mm_stat mem_limit is ''${lim:-unreadable}" >&2
             echo "  the physical budget is nixram's whole model in this mode -- without it the" >&2
             echo "  virtual ceiling is the only bound, which is not what was declared." >&2
             drift=1
