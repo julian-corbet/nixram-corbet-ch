@@ -426,6 +426,44 @@ let
       (!(cfg-sizing-physical.services.zram-generator.settings.zram0 ? "zram-size"))
       "zram0: ${builtins.toJSON cfg-sizing-physical.services.zram-generator.settings.zram0}")
 
+    # --- mode XOR is ENFORCED, not just documented -------------------------
+    # The option text has always called zram and zswap "mutually exclusive",
+    # but that was enforced only by not CONFIGURING both. On a kernel built
+    # with CONFIG_ZSWAP_DEFAULT_ON=y, zswap is armed before userspace exists,
+    # so mode="zram" produced exactly the forbidden combination -- and with
+    # zram as the only swap device, zswap's writeback target is RAM itself.
+    (check "mode-zram/disables-zswap-on-cmdline"
+      (lib.elem "zswap.enabled=0" cfg-4G.boot.kernelParams)
+      "kernelParams: ${builtins.toJSON cfg-4G.boot.kernelParams}")
+
+    (check "mode-zram/runtime-disable-unit-exists"
+      (cfg-4G.systemd.services ? "nixram-zswap-disable")
+      "services: ${builtins.toJSON (builtins.attrNames cfg-4G.systemd.services)}")
+
+    (check "mode-zram/runtime-disable-uses-only-shell-builtins"
+      # No cat/awk/sed: a unit's PATH does not include coreutils for free.
+      (!(lib.any (b: lib.hasInfix b cfg-4G.systemd.services."nixram-zswap-disable".script)
+        [ "cat " "awk " "sed " "grep " ]))
+      "script: ${cfg-4G.systemd.services."nixram-zswap-disable".script}")
+
+    (check "mode-zram/runtime-disable-tolerates-absent-sysfs"
+      (lib.hasInfix "CONFIG_ZSWAP=n" cfg-4G.systemd.services."nixram-zswap-disable".script)
+      "script: ${cfg-4G.systemd.services."nixram-zswap-disable".script}")
+
+    # mode="none" must NOT touch zswap either way -- it means "no swap-medium
+    # opinion", and two real fleet hosts run mode="none" precisely to adopt
+    # only the oomd layer. Silently disabling their zswap would be a
+    # surprise change well outside what they opted into.
+    (check "mode-none/does-not-touch-zswap"
+      (!(lib.any (p: lib.hasPrefix "zswap." p) cfg-mode-none.boot.kernelParams)
+        && !(cfg-mode-none.systemd.services ? "nixram-zswap-disable"))
+      "kernelParams: ${builtins.toJSON cfg-mode-none.boot.kernelParams}")
+
+    (check "mode-zswap/does-not-disable-itself"
+      (!(lib.elem "zswap.enabled=0" cfg-mode-zswap.boot.kernelParams)
+        && !(cfg-mode-zswap.systemd.services ? "nixram-zswap-disable"))
+      "kernelParams: ${builtins.toJSON cfg-mode-zswap.boot.kernelParams}")
+
     # --- mode-zswap ------------------------------------------------------
     # Values here match elitebook's real production deployment, not the
     # untested upstream/Pop!_OS defaults -- rationale.md [5], [10].

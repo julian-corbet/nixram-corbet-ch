@@ -99,6 +99,15 @@ in
         `zram` and `zswap` are deliberately mutually exclusive (not
         offered as a combination): double-compression, no sourced
         benefit. See docs/faq.md.
+
+        That exclusivity is ENFORCED, not merely documented: `zram` mode
+        actively turns zswap OFF (`zswap.enabled=0` on the kernel command
+        line, plus a switch-time runtime write). This matters because a
+        kernel built with CONFIG_ZSWAP_DEFAULT_ON=y arms zswap before
+        userspace exists, with no cmdline parameter and nothing in any
+        config file to point at -- so on those kernels "don't configure
+        both" was never enough to prevent both from RUNNING. `none` does
+        not touch zswap either way: it means "no swap-medium opinion".
       '';
     };
 

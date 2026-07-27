@@ -200,6 +200,67 @@ in
     services.zram-generator.enable = true;
     services.zram-generator.settings.zram0 = zramGeneratorSettings;
 
+    # ENFORCE the mode XOR against the KERNEL's own default, not just against
+    # this module's other branch. `mode` documents zram and zswap as "deliberately
+    # mutually exclusive", but until now that was enforced only by not
+    # CONFIGURING both -- nothing ever turned the other one OFF. Any kernel built
+    # with CONFIG_ZSWAP_DEFAULT_ON=y (all CachyOS kernels, among others) arms
+    # zswap before userspace exists, with no cmdline parameter and nothing in any
+    # config file to point at. On such a kernel `mode = "zram"` silently produced
+    # exactly the combination the option text promises is impossible.
+    #
+    # And it is worse than the usual double-compression argument, because zswap's
+    # writeback target is the swap device -- which in this mode is zram, i.e. RAM.
+    # A zswap pool in front of a zram device compresses already-compressed pages
+    # into the same resource it is caching, and its eviction path leads nowhere:
+    # there is no durable store to shed to, so under real pressure the box can
+    # only compress, never actually free anything. Observed on a 125 GiB host
+    # whose only swap device was zram: zswap enabled=Y, stored_pages climbing,
+    # written_back_pages pinned at 0.
+    boot.kernelParams = [ "zswap.enabled=0" ];
+
+    # The kernel parameter only takes effect on the NEXT BOOT, so a `switch` on a
+    # box that already booted with zswap armed would leave it armed -- the same
+    # "writing it is not applying it" gap the sysctl layer solves with its reapply
+    # bridge. This closes it at switch time too. Disabling zswap at runtime stops
+    # new stores; pages already in the pool stay readable and fault back in
+    # normally, so this is safe to run on a live box with a non-empty pool.
+    #
+    # Ordered before the zram device comes up so zswap is never armed in front of
+    # it. Deliberately uses only shell BUILTINS (read/printf/test, no cat/awk) --
+    # a systemd unit's PATH does not include coreutils just because something else
+    # installed it, the exact trap that made nixram-zram-recompress exit 127 until
+    # it grew an explicit `path`.
+    systemd.services.nixram-zswap-disable = {
+      description = "Disable zswap (nixram mode=\"zram\" -- the two are mutually exclusive)";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "systemd-zram-setup@zram0.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        param=/sys/module/zswap/parameters/enabled
+
+        if [ ! -e "$param" ]; then
+          echo "nixram: $param absent -- this kernel has no zswap (CONFIG_ZSWAP=n); nothing to disable"
+          exit 0
+        fi
+
+        read -r cur < "$param"
+        if [ "$cur" = "N" ]; then
+          echo "nixram: zswap already disabled"
+          exit 0
+        fi
+
+        if printf '0' > "$param"; then
+          echo "nixram: zswap disabled (mode=\"zram\"): a zswap pool in front of a zram device double-compresses into the same RAM it is caching, and has no durable store to write back to"
+        else
+          echo "nixram: WARNING could not write $param -- zswap stays armed in front of the zram device until the next boot picks up zswap.enabled=0 from the kernel command line" >&2
+        fi
+      '';
+    };
+
     systemd.services.nixram-zram-recompress = mkIf cfg.zram.recompressionTimer.enable {
       description = "nixram zram idle-page recompression (rolling two-phase pass)";
       # Explicit PATH dependency -- the script uses `awk`, and a systemd
