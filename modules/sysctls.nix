@@ -208,5 +208,25 @@ in
     systemd.tmpfiles.rules = [
       "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - ${toString activeLevel.mglruMinTtlMs}"
     ];
+
+    # Opt-in insurance bridge -- see "OPT-IN REAPPLY BRIDGE" in the file
+    # header and `sysctls.reapplyBridge.enable`'s own doc comment
+    # (modules/default.nix) for why this is off by default here, unlike
+    # the identically-named unit in system-manager/sysctls.nix where it is
+    # load-bearing. `restartTriggers` on the SAME store path NixOS's own
+    # `systemd-sysctl.restartTriggers` already watches -- this unit's own
+    # path moves whenever that file's content changes, so it re-fires on
+    # every declarative sysctl change, independent of (in addition to,
+    # never instead of) NixOS's own built-in trigger.
+    systemd.services.nixram-sysctl-reapply = mkIf cfg.sysctls.reapplyBridge.enable {
+      description = "Re-apply /etc/sysctl.d/60-nixos.conf after a declarative change (opt-in insurance against an observed systemd-sysctl regression that can exit 0 having applied nothing)";
+      wantedBy = [ "multi-user.target" ];
+      restartTriggers = [ config.environment.etc."sysctl.d/60-nixos.conf".source ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${config.systemd.package}/bin/systemctl restart systemd-sysctl.service";
+      };
+    };
   };
 }

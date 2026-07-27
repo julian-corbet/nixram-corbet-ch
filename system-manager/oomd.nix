@@ -27,21 +27,6 @@
 # `systemd.oomd.*` option surface to set natively. `ManagedOOMSwap=kill` (the
 # PER-UNIT equivalent) still has no opt-in anywhere; only the box-wide
 # SwapUsedLimit does.
-#
-# DAEMON-WIDE [OOM] DEFAULTS: `oomd.defaultMemoryPressureLimitPercent` /
-# `oomd.defaultMemoryPressureDurationSec` -- same OFF-by-default, same
-# daemon-scoped-not-slice-scoped distinction as modules/oomd.nix's own
-# header comment explains; rendered here as their own `oomd.conf.d/`
-# drop-in files, same mechanism as `swapUsedLimitPercent` immediately
-# above (one option, one file, same precedent).
-#
-# "system.slice": arms with the same PSI config as "-.slice"/"user.slice"
-# when `oomd.enableSystemSlice` is set -- see that option's own doc
-# comment (system-manager/default.nix, mirroring modules/default.nix) for
-# why. Rendered the SAME "declare the key only when armed" way
-# "-.slice"/"user.slice" already are below (`optionalAttrs`, not `mkIf` on
-# the contents) -- load-bearing on this backend specifically, see the
-# `oomd.enable`-gating comment further down.
 
 { lib, config, pkgs, ... }:
 
@@ -143,24 +128,6 @@ in
             SwapUsedLimit=${toString cfg.oomd.swapUsedLimitPercent}%
           '';
         };
-      }
-      // optionalAttrs (cfg.oomd.defaultMemoryPressureLimitPercent != null) {
-        "systemd/oomd.conf.d/nixram-default-memory-pressure-limit.conf" = {
-          replaceExisting = true;
-          text = ''
-            [OOM]
-            DefaultMemoryPressureLimit=${toString cfg.oomd.defaultMemoryPressureLimitPercent}%
-          '';
-        };
-      }
-      // optionalAttrs (cfg.oomd.defaultMemoryPressureDurationSec != null) {
-        "systemd/oomd.conf.d/nixram-default-memory-pressure-duration.conf" = {
-          replaceExisting = true;
-          text = ''
-            [OOM]
-            DefaultMemoryPressureDurationSec=${toString cfg.oomd.defaultMemoryPressureDurationSec}s
-          '';
-        };
       };
 
     # mkDefault on the CONTENTS, not just the mkIf gate -- same fix and same
@@ -193,18 +160,10 @@ in
     # a plain assignment when oomd IS enabled -- that escape hatch was itself a
     # 2026-07-24 review fix and must not regress.
     systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices)
-      // optionalAttrs cfg.oomd.enable ({
+      // optionalAttrs cfg.oomd.enable {
         "-".sliceConfig = mkDefault pressureSliceConfig;
         "user".sliceConfig = mkDefault pressureSliceConfig;
-      }
-      # "system.slice" is a SEPARATE opt-in on top of `oomd.enable`, nested
-      # the same way -- so it is declared only when BOTH are true, never
-      # left half-declared with empty contents the way the NixOS module can
-      # safely do (see `oomd.enable`'s own comment below for why an empty
-      # declaration is unsafe on this backend specifically).
-      // optionalAttrs cfg.oomd.enableSystemSlice {
-        "system".sliceConfig = mkDefault pressureSliceConfig;
-      });
+      };
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

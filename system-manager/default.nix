@@ -146,6 +146,25 @@ in
         '';
       };
 
+      enableSystemSlice = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Same option and same "off by default, opt in explicitly"
+          reasoning as the NixOS module's `oomd.enableSystemSlice` -- see
+          modules/default.nix for the full writeup. Also arms
+          "system.slice" with the same PSI config as "-.slice"/"user.slice"
+          when set; renders via `systemd.slices."system"` here exactly like
+          the NixOS module (a real, supported system-manager option, see
+          the file header), gated the SAME "declare the key only when
+          armed" way "-.slice"/"user.slice" already are on this backend
+          (see system-manager/oomd.nix), not the NixOS module's
+          always-declared-key-empty-contents approach -- that difference is
+          load-bearing on this backend specifically (see
+          system-manager/oomd.nix's own comment on `oomd.enable`).
+        '';
+      };
+
       pressureLimitPercent = mkOption {
         type = types.ints.between 1 100;
         default = activeLevel.oomd.pressureLimitPercent;
@@ -220,6 +239,35 @@ in
         '';
       };
 
+      defaultMemoryPressureLimitPercent = mkOption {
+        type = types.nullOr (types.ints.between 1 100);
+        default = null;
+        description = ''
+          Same escape hatch as the NixOS module's
+          `oomd.defaultMemoryPressureLimitPercent` -- sets oomd.conf's
+          daemon-wide [OOM] `DefaultMemoryPressureLimit`, rendered
+          differently here: system-manager has no `systemd.oomd.*` option
+          surface at all, so this writes its own `oomd.conf.d/` drop-in
+          file, same mechanism as `swapUsedLimitPercent` above. See
+          modules/default.nix for the full reasoning (a real host on this
+          exact backend is one of the two that motivated adding this
+          option at all).
+        '';
+      };
+
+      defaultMemoryPressureDurationSec = mkOption {
+        type = types.nullOr types.ints.positive;
+        default = null;
+        description = ''
+          Same escape hatch as the NixOS module's
+          `oomd.defaultMemoryPressureDurationSec` -- the paired daemon-wide
+          `DefaultMemoryPressureDurationSec`, rendered as its own
+          `oomd.conf.d/` drop-in file. Independent of
+          `defaultMemoryPressureLimitPercent`: either can be set without
+          the other.
+        '';
+      };
+
       pressureDiagnostics.enable = mkOption {
         type = types.bool;
         default = cfg.mode == "zswap";
@@ -273,19 +321,26 @@ in
       {
         # Same reserved-name hazard as modules/default.nix: system-manager/oomd.nix
         # builds `systemd.slices` as a shallow Nix `//` of the sacrificial-slice
-        # attrset with a hardcoded "-"/"user" literal -- a colliding name would be
-        # silently discarded with no error. See modules/default.nix's matching
-        # assertion for the full reasoning.
+        # attrset with a hardcoded "-"/"user"/(optionally, via
+        # `oomd.enableSystemSlice`) "system" literal -- a colliding name would be
+        # silently discarded with no error. Reserved unconditionally here, the
+        # same way "-"/"user" are reserved regardless of `oomd.enable`, so
+        # flipping `enableSystemSlice` on later can never retroactively make a
+        # previously-fine `sacrificialSlices."system"` start silently vanishing.
+        # See modules/default.nix's matching assertion for the full reasoning.
         assertion = !(cfg.oomd.sacrificialSlices ? "-")
           && !(cfg.oomd.sacrificialSlices ? "-.slice")
           && !(cfg.oomd.sacrificialSlices ? "user")
-          && !(cfg.oomd.sacrificialSlices ? "user.slice");
+          && !(cfg.oomd.sacrificialSlices ? "user.slice")
+          && !(cfg.oomd.sacrificialSlices ? "system")
+          && !(cfg.oomd.sacrificialSlices ? "system.slice");
         message = ''
           services.nixram.oomd.sacrificialSlices must not use the reserved
-          names "-" / "-.slice" or "user" / "user.slice" -- those are the
-          two slices this module itself already manages (the box-wide PSI
-          root and user slices). A sacrificialSlices entry with either name
-          would be silently discarded by an internal merge, losing its
+          names "-" / "-.slice", "user" / "user.slice", or "system" /
+          "system.slice" -- those are the three slices this module itself
+          already manages (the box-wide PSI root, user, and optional system
+          slices). A sacrificialSlices entry with any of those names would
+          be silently discarded by an internal merge, losing its
           MemoryHigh/MemoryMax containment with no error. Pick a different
           slice name for whatever workload you're sacrificing.
         '';

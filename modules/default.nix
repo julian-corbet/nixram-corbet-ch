@@ -302,7 +302,7 @@ in
       description = "The backing disk-swap medium behind zswap. Drives vm.page-cluster (2 for ssd, kernel default 3 for hdd) -- a disk-medium property, distinct from zram's page-cluster=0.";
     };
 
-    oomd.enable = mkOption {
+    oomd.enable = mkOption { # MARKER-TEST-12345
       type = types.bool;
       default = activeLevel.oomd.enable;
       description = "Arm systemd-oomd with PSI-based thresholds from the active level. Off only at the 256M level by default (unmeasured tradeoff, not a sourced number -- see docs/rationale.md [8]); override freely either direction.";
@@ -447,10 +447,75 @@ in
       '';
     };
 
+    oomd.defaultMemoryPressureLimitPercent = mkOption {
+      type = types.nullOr (types.ints.between 1 100);
+      default = null;
+      description = ''
+        Escape hatch: also set systemd-oomd's DAEMON-WIDE default
+        (oomd.conf's own [OOM] section `DefaultMemoryPressureLimit`),
+        alongside the per-slice `ManagedOOMMemoryPressureLimit` this
+        module already configures on "-.slice"/"user.slice"/(optionally)
+        "system.slice". This is a DIFFERENT, daemon-scoped concern: it is
+        systemd-oomd's own fallback limit for any unit/slice that has
+        `ManagedOOMMemoryPressure` armed but no explicit
+        `ManagedOOMMemoryPressureLimit` of its own (e.g. a unit a host
+        configures directly, outside `oomd.units`/the slices this module
+        manages). nixram had no option for this at all until two real
+        hosts were each found hand-writing it independently -- one via
+        `systemd.oomd.settings` directly on NixOS, one via an
+        `oomd.conf.d/` drop-in on the system-manager backend (see
+        `system-manager/oomd.nix` for that rendering).
+
+        OFF (null) by default: every threshold this module sets elsewhere
+        is scoped to a specific slice on purpose; this daemon-wide default
+        is a separate, opt-in concern layered on top, not implied by
+        `oomd.enable`.
+      '';
+    };
+
+    oomd.defaultMemoryPressureDurationSec = mkOption {
+      type = types.nullOr types.ints.positive;
+      default = null;
+      description = ''
+        Escape hatch: the paired daemon-wide `DefaultMemoryPressureDurationSec`
+        -- see `oomd.defaultMemoryPressureLimitPercent` immediately above
+        for the full reasoning (same daemon-wide [OOM] section, same
+        "two real hosts already hand-wrote this" origin). Independent of
+        `oomd.defaultMemoryPressureLimitPercent`: either can be set without
+        the other.
+      '';
+    };
+
     sysctls.enable = mkOption {
       type = types.bool;
       default = true;
       description = "Escape hatch: set to false to disable nixram's sysctl layer entirely (swappiness, page-cluster, watermark_*, MGLRU min_ttl_ms) while still getting the zram/zswap device and oomd wiring.";
+    };
+
+    sysctls.reapplyBridge.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Opt-in insurance unit ("nixram-sysctl-reapply") that re-applies
+        `/etc/sysctl.d/60-nixos.conf` (via `systemctl restart
+        systemd-sysctl.service`) whenever this module's rendered sysctl
+        content changes -- the same `restartTriggers`-bridge pattern the
+        system-manager backend's own `nixram-sysctl-reapply` unit already
+        has to use (see `system-manager/sysctls.nix`), reused here as a
+        second attempt rather than a load-bearing requirement.
+
+        OFF by default here, unlike the system-manager backend: NixOS
+        itself already wires `systemd.services.systemd-sysctl.restartTriggers`
+        to that same file (confirmed directly against
+        nixos/modules/config/sysctl.nix), so a plain `nixos-rebuild switch`
+        normally reapplies changed sysctls correctly on its own -- this
+        bridge is redundant there, not missing functionality. It exists as
+        opt-in insurance for a host that has actually observed the
+        built-in reapply silently fail to take effect: a real host carries
+        this exact extra unit after seeing `systemd-sysctl` exit 0 having
+        applied nothing, a real systemd regression, not a nixram design
+        gap. Everyone else should leave this off.
+      '';
     };
 
     minFreeKbytesOverride = mkOption {
@@ -526,23 +591,30 @@ in
       }
       {
         # modules/oomd.nix builds `systemd.slices` as
-        # `listToAttrs (map sacrificialSliceEntry ...) // { "-" = ...; "user" = ...; }`
+        # `listToAttrs (map sacrificialSliceEntry ...) // { "-" = ...; "user" = ...; "system" = ...; }`
         # -- a plain, shallow Nix `//`, not a module-system merge. A
-        # sacrificialSlices entry keyed "-"/"-.slice"/"user"/"user.slice"
-        # would be silently and completely discarded by that merge (the
-        # hardcoded literal on the right always wins the whole key), losing
-        # its MemoryHigh/MemoryMax containment with no build error at all.
-        # Caught adversarially; see the finding this assertion closes.
+        # sacrificialSlices entry keyed "-"/"-.slice"/"user"/"user.slice"/
+        # "system"/"system.slice" would be silently and completely discarded
+        # by that merge (the hardcoded literal on the right always wins the
+        # whole key), losing its MemoryHigh/MemoryMax containment with no
+        # build error at all -- true of "system" even while
+        # `oomd.enableSystemSlice` is off, since the hardcoded key is present
+        # in the merge either way (only its sliceConfig CONTENTS are
+        # `mkIf`-gated). Caught adversarially; see the finding this assertion
+        # closes.
         assertion = !(cfg.oomd.sacrificialSlices ? "-")
           && !(cfg.oomd.sacrificialSlices ? "-.slice")
           && !(cfg.oomd.sacrificialSlices ? "user")
-          && !(cfg.oomd.sacrificialSlices ? "user.slice");
+          && !(cfg.oomd.sacrificialSlices ? "user.slice")
+          && !(cfg.oomd.sacrificialSlices ? "system")
+          && !(cfg.oomd.sacrificialSlices ? "system.slice");
         message = ''
           services.nixram.oomd.sacrificialSlices must not use the reserved
-          names "-" / "-.slice" or "user" / "user.slice" -- those are the
-          two slices this module itself already manages (the box-wide PSI
-          root and user slices). A sacrificialSlices entry with either name
-          would be silently discarded by an internal merge, losing its
+          names "-" / "-.slice", "user" / "user.slice", or "system" /
+          "system.slice" -- those are the three slices this module itself
+          already manages (the box-wide PSI root, user, and optional system
+          slices). A sacrificialSlices entry with any of those names would
+          be silently discarded by an internal merge, losing its
           MemoryHigh/MemoryMax containment with no error. Pick a different
           slice name for whatever workload you're sacrificing.
         '';

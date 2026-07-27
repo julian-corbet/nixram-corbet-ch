@@ -3,7 +3,12 @@
 # Arms systemd-oomd with PSI (pressure stall information) thresholds
 # from the active level, on "-.slice" (the whole system) and
 # "user.slice" (the parent of every per-session "user-$UID.slice"
-# instance, so the whole user subtree is covered).
+# instance, so the whole user subtree is covered), plus OPTIONALLY
+# "system.slice" (the parent of every system SERVICE unit -- gated on
+# `oomd.enableSystemSlice`, off by default; see that option's own doc
+# comment in modules/default.nix for why a small server needs it armed
+# to get any real detection surface at all, and why it isn't on
+# unconditionally).
 #
 # NixOS naming note: the attribute names under `systemd.slices` EXCLUDE
 # the ".slice" suffix -- `systemd.slices."-"` renders "-.slice",
@@ -36,11 +41,21 @@
 # We do not use the built-in `systemd.oomd.enableRootSlice` /
 # `enableSystemSlice` / `enableUserSlices` helpers: they hardcode an 80%
 # pressure limit with no duration control, which doesn't let nixram
-# express its own per-level PSI values. We set the same two slices
-# ourselves instead, with our own numbers. (That 80% figure also isn't
-# a real systemd-oomd/Fedora number under any name we could find --
-# nixram's flat 60%/30s is the actual compiled-in upstream default; see
-# docs/rationale.md [10].)
+# express its own per-level PSI values. We set the same two (optionally
+# three, see `oomd.enableSystemSlice`) slices ourselves instead, with our
+# own numbers. (That 80% figure also isn't a real systemd-oomd/Fedora
+# number under any name we could find -- nixram's flat 60%/30s is the
+# actual compiled-in upstream default; see docs/rationale.md [10].)
+#
+# DAEMON-WIDE [OOM] DEFAULTS: `oomd.defaultMemoryPressureLimitPercent` /
+# `oomd.defaultMemoryPressureDurationSec`, both OFF (null) by default, set
+# oomd.conf's own `DefaultMemoryPressureLimit`/`DefaultMemoryPressureDurationSec`
+# -- systemd-oomd's OWN fallback for any unit/slice armed with
+# `ManagedOOMMemoryPressure` but no explicit limit of its own. Distinct
+# from every per-slice value this file sets: those are scoped to a named
+# slice on purpose, this is daemon-scoped. Added because two real hosts
+# were each found hand-setting this outside nixram's reach entirely (see
+# those two options' own doc comments in modules/default.nix).
 #
 # PRESSURE DIAGNOSTICS: a second, independent unit below (gated on
 # `oomd.pressureDiagnostics.enable`, on by default only for
@@ -197,17 +212,44 @@ in
     # `//`-merged with the sacrificial slices for the same reason as
     # `systemd.services` above -- one `systemd.slices` attrset, not a mix of
     # dotted-path and whole-set assignment in the same module.
+    #
+    # "system".sliceConfig carries a SECOND gate ("oomd.enableSystemSlice",
+    # not just "oomd.enable") -- unlike "-"/"user", arming it is a new
+    # monitored surface a host must opt into explicitly (see that option's
+    # own doc comment). The hardcoded "system" key is present in this merge
+    # unconditionally either way (only its sliceConfig CONTENTS are gated),
+    # same reasoning as "-"/"user" always being present -- this is also why
+    # the reserved-name assertion in modules/default.nix covers "system"
+    # even while the option defaults off.
     systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices) // {
       "-".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
       "user".sliceConfig = mkIf cfg.oomd.enable (mkDefault pressureSliceConfig);
+      "system".sliceConfig = mkIf (cfg.oomd.enable && cfg.oomd.enableSystemSlice) (mkDefault pressureSliceConfig);
     };
 
-    # SwapUsedLimit: OFF unless a host opts in -- see the option's own doc
-    # comment (modules/default.nix) and docs/faq.md for the blind-spot
-    # reasoning this module otherwise deliberately avoids it for.
-    systemd.oomd.settings.OOM = mkIf (cfg.oomd.swapUsedLimitPercent != null) {
-      SwapUsedLimit = mkDefault "${toString cfg.oomd.swapUsedLimitPercent}%";
-    };
+    # Daemon-wide [OOM] defaults: SwapUsedLimit is OFF unless a host opts in
+    # (see the option's own doc comment in modules/default.nix and
+    # docs/faq.md for the blind-spot reasoning this module otherwise
+    # deliberately avoids it for); DefaultMemoryPressureLimit/
+    # DefaultMemoryPressureDurationSec are likewise OFF (null) unless a host
+    # opts in -- see those two options' own doc comments. `mkMerge`, not
+    # three separate dotted-path definitions of the same option in this one
+    # module (Nix's own attrset-literal rule forbids that regardless of the
+    # module system, same reason `systemd.services`/`systemd.slices` above
+    # are each built as one expression): each `mkIf` here still contributes
+    # independently, exactly like `boot.kernel.sysctl`'s `mkMerge` in
+    # modules/sysctls.nix.
+    systemd.oomd.settings.OOM = mkMerge [
+      (mkIf (cfg.oomd.swapUsedLimitPercent != null) {
+        SwapUsedLimit = mkDefault "${toString cfg.oomd.swapUsedLimitPercent}%";
+      })
+      (mkIf (cfg.oomd.defaultMemoryPressureLimitPercent != null) {
+        DefaultMemoryPressureLimit = mkDefault "${toString cfg.oomd.defaultMemoryPressureLimitPercent}%";
+      })
+      (mkIf (cfg.oomd.defaultMemoryPressureDurationSec != null) {
+        DefaultMemoryPressureDurationSec = mkDefault "${toString cfg.oomd.defaultMemoryPressureDurationSec}s";
+      })
+    ];
 
     systemd.timers.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "Timer for nixram PSI pressure diagnostic snapshot";
