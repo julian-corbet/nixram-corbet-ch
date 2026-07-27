@@ -21,8 +21,8 @@ their comments, so don't renumber without updating both.
 * 75 / 100`** (75%) everywhere else (2G-128G, spanning both the 25%- and
 20%-resident groups).
 
-**Derivation — Julian's own formula, worked through exactly, not
-approximated.** He gave it hand-wavy: "take the physical ram, multiply by
+**Derivation — the operator's stated formula, worked through exactly, not
+approximated.** Stated hand-wavy: "take the physical ram, multiply by
 pi and take the nearest base 2ish value." "Physical ram" here means the
 resident-limit budget ([2]), which this project has called "physical" all
 along (row 3 of `philosophy.md`). "Base 2ish" means a **3-smooth number**
@@ -56,9 +56,10 @@ first and technically works, but is unnecessary complexity once the
 reduction above is done — two flat fractions produce the identical result
 with none of the runtime branching.
 
-**Checked precisely against Julian's own corrections and worked examples:**
+**Checked precisely against the operator's own corrections and worked
+examples:**
 
-| example | physical budget | budget x pi() | ceiling | Julian's own estimate/correction |
+| example | physical budget | budget x pi() | ceiling | the operator's own estimate/correction |
 |---|---|---|---|---|
 | 256M | 76.8 MiB (30%) | 241.3 MiB | **256 MiB** (ram) | "almost 400M" total (real+virtual) |
 | 512M (vultr) | 153.6 MiB (30%) | 482.5 MiB | **512 MiB** (ram) | "maybe 450-500MB virtual RAM" |
@@ -66,8 +67,8 @@ with none of the runtime branching.
 | 1G (e2-micro) | 307.2 MiB (30%) | 965.1 MiB | **1024 MiB** (ram) | "almost a GB" |
 | ~128G (server) | ~25.6 GiB (20%) | ~80.4 GiB | **96 GiB** (ram x 0.75) | "96GB is better" — exact |
 
-Two of these (768M, ~128G) are Julian's own direct corrections to an
-intermediate pure-power-of-two-only version of this formula, which had
+Two of these (768M, ~128G) are the operator's own direct corrections to
+an intermediate pure-power-of-two-only version of this formula, which had
 rounded them down to 512 MiB and 64 GiB respectively — both technically
 3-smooth-adjacent but the WRONG grid point, since pure powers of two
 exclude the ×1.5 family (768 = 1.5 x 512; 96 = 1.5 x 64) that real RAM/VPS
@@ -77,8 +78,8 @@ tiers also use.
 (zstd(level=3)'s real measured compression ratio, experiment 006:
 2.09-3.30 across four real corpora, which `pi()` ≈ 3.14159 sits
 comfortably inside); directed for the pi()/3-smooth-rounding mechanism
-itself and both of its corrections (Julian's own formula and his own two
-worked-example fixes).
+itself and both of its corrections (the operator's stated formula and
+the operator's own two worked-example fixes).
 
 **Honest side-effect, stated plainly:** because `ram * 75 / 100` applies
 uniformly across both the 25%-resident group (2G-16G) and the 20%-resident
@@ -107,10 +108,11 @@ real, and is exactly why `zram.sizing` defaults to `"both"`, never
 *is* the only ceiling, and a generous one really can let compression
 overhead balloon.
 
-**Source:** the pi()/3-smooth-rounding derivation is Julian's own formula
-and his own two corrections to it (768M, ~128G), worked through precisely
-using real math, not approximated. The underlying ratio this formula
-approximates is this project's own measurement (experiment 006).
+**Source:** the pi()/3-smooth-rounding derivation is the operator's own
+stated formula and the operator's own two corrections to it (768M,
+~128G), worked through precisely using real math, not approximated. The
+underlying ratio this formula approximates is this project's own
+measurement (experiment 006).
 Historical context only, no longer load-bearing for the formula itself:
 Fedora's F33 "SwapOnZRAM" change shipped `min(ram/2, 4096)`; current
 Fedora/zram-generator defaults scale to full RAM capacity capped at 8G;
@@ -122,14 +124,15 @@ recommend the 0.1-0.5 fraction range referenced above.
 **Decision:** `zram-resident-limit` (mem_limit) tapers in three steps:
 `ram * 30 / 100` (30%) at 256M-1G, `ram * 25 / 100` (25%) at 2G-16G,
 `ram * 20 / 100` (20%) at 24G-128G. Every tier now sets a real physical cap
-— none is left unset. **Attribution, precisely:** 20% at ~128G is Julian's
-own stated figure ("taking a 20% slice of system RAM here is about 25GB");
-30% at 256M-1G is also his (from the e2-micro/vultr/256M walkthrough). The
-25% band and — importantly — *where exactly the step to 20% begins*
-(24G, not 32G or 64G) are Claude's own extrapolated placement, not
-something Julian specified. He gave one data point in the entire 2G-128G
-range (20% at ~128G); the rest of the shape was built to connect it to the
-30% anchor, and should be read as reasoned, not confirmed.
+— none is left unset. **Attribution, precisely:** 20% at ~128G is the
+operator's own stated figure ("taking a 20% slice of system RAM here is
+about 25GB"); 30% at 256M-1G is also the operator's (from the
+e2-micro/vultr/256M walkthrough). The 25% band and — importantly — *where
+exactly the step to 20% begins* (24G, not 32G or 64G) are this project's
+own extrapolated placement, not an operator-specified value. One data
+point was given in the entire 2G-128G range (20% at ~128G); the rest of
+the shape was built to connect it to the 30% anchor, and should be read
+as reasoned, not confirmed.
 
 **Honesty:** mixed. The resident-limit primitive itself is sourced — a
 first-class `zram-generator.conf` key that maps directly onto the kernel's
@@ -140,10 +143,11 @@ this design (below).
 **Reasoning:** disksize alone is a virtual ceiling that can misrepresent the
 real physical cost once compression enters the picture. This budget is what
 keeps the actual physical spend bounded regardless of what disksize claims —
-but the reason for that bound changed, and the correction is Julian's own,
-not a re-derivation from new evidence. An earlier version of this design
-reasoned the budget as *memory-safety headroom*: `ram / 2` on the smallest
-tiers "where headroom is scarce and every MiB has to be accounted for,"
+but the reason for that bound changed, and the correction is the
+operator's own, not a re-derivation from new evidence. An earlier version
+of this design reasoned the budget as *memory-safety headroom*: `ram / 2`
+on the smallest tiers "where headroom is scarce and every MiB has to be
+accounted for,"
 tapering to 35% where "there's more slack," and unset above 64G because
 "the disksize formula already caps the virtual ceiling... an additional
 physical cap was judged redundant." That reasoning is now understood to be
@@ -169,8 +173,8 @@ formula). This closes what was previously an open question at 64G/128G
 A flat 20% from 24G through 128G was briefly revised to a fourth step (15%
 at 64G/128G) on an absolute-cache-reservoir argument — 20% of a 128 GiB box
 being a much bigger physical budget than 20% of a 24 GiB one. That revision
-was **reverted**: Julian gave an explicit, specific figure for the 128G
-tier ("taking a 20% slice of system RAM here is about 25GB"), and no
+was **reverted**: the operator gave an explicit, specific figure for the
+128G tier ("taking a 20% slice of system RAM here is about 25GB"), and no
 further re-derivation was asked for or warranted there — 20% stands as
 stated, at every tier from 24G up.
 
@@ -185,7 +189,7 @@ for. See `faq.md`.
 
 **Source:** zram-generator's own upstream docs (the `zram-resident-limit` /
 `mem_limit` key); the kernel's zram sysfs documentation (`mem_limit`). The
-specific percentages are nixram's own policy call (Julian's explicit
+specific percentages are nixram's own policy call (the operator's explicit
 correction), not sourced from any upstream guidance.
 
 ## [3] vm.swappiness: 120 (256M-1G), 10 at rest / relief-gated (2G-128G), zswap 25
@@ -198,43 +202,46 @@ sustained memory pressure — see [17] for the full mechanism and why 60
 alone stopped being the right resting value. zswap's own profile uses
 **25**.
 
-**120, not 130 — Julian's own further revision, directed.** The value
-went through three stages: 180 (Pop!_OS's own zram default) -> 130
-(adversarially revised down, reasoning below) -> **120** (Julian's own
-further revision, stated directly, no additional reasoning given beyond
-the number itself). Applied as-is at every eager tier.
+**120, not 130 — the operator's own further revision, directed.** The
+value went through three stages: 180 (Pop!_OS's own zram default) -> 130
+(adversarially revised down, reasoning below) -> **120** (the operator's
+own further revision, stated directly, no additional reasoning given
+beyond the number itself). Applied as-is at every eager tier.
 
 **Boundary moved from 1G/2G to 1G joining the eager group — a real
 correction, not a rename.** An earlier version of this note put the
 eager/reluctant split at 1G/2G, reasoning 1G had "enough true RAM to be
-reluctant." That was undone once Julian explained the actual distinguishing
-factor between his small-tier and large-tier examples directly ([9]):
-"with 1GB RAM, you need to get whatever you can" describes urgency, the
-same "light usage, RAM-desperate" story that justifies 256M/512M's eager
-value — not "enough RAM to comfortably wait" the old 60 value was reasoned
-from. Swappiness now groups with the compression-architecture split (row
-4 / [9]) rather than cutting across it.
+reluctant." That was undone once the operator explained the actual
+distinguishing factor between the small-tier and large-tier examples
+directly ([9]): "with 1GB RAM, you need to get whatever you can" describes
+urgency, the same "light usage, RAM-desperate" story that justifies
+256M/512M's eager value — not "enough RAM to comfortably wait" the old 60
+value was reasoned from. Swappiness now groups with the
+compression-architecture split (row 4 / [9]) rather than cutting across
+it.
 
 **Honesty:** mixed. The kernel's IO-cost model and the 0-200 range
 extension are sourced. 180 as a value is sourced (Pop!_OS), but this
 project no longer uses 180 anywhere — see the correction below. zswap's 25
-is directed — Julian's own stated figure, sourced from the elitebook's real
-production config (see the zswap-profile note below). 120 (the eager
-tiers' final value) is also directed — Julian's own explicit revision.
-The reluctant tiers' resting value, 10, is likewise directed — Julian's
-own real historical data point (the fleet's previous Unraid server), given
-directly when he questioned whether 60 was still too high. The tier split
-itself (dire tiers eager, reluctant tiers low-at-rest) generalizes Julian's
-qualitative direction ("swappiness should be low, and super low for
-zswap... only push very cold pages there voluntarily"), and where the
-eager/reluctant line falls is Claude's own policy call — but neither final
-resting number is just reasoned anymore: the eager value went through an
-adversarially-revised intermediate stage (130, down from an initial 180,
-Claude's own call) then a further revision to 120 (Julian's own number);
-the reluctant value went from a plausible-sounding but unchecked 60
-straight to Julian's own real data point, 10. The PSI-relief mechanism
-built around that 10 ([17]) is Claude's own design, not something Julian
-specified beyond the intent behind it.
+is directed — the operator's own stated figure, sourced from the
+reference laptop's real production config (see the zswap-profile note
+below). 120 (the eager tiers' final value) is also directed — the
+operator's own explicit revision. The reluctant tiers' resting value,
+10, is likewise directed — the operator's own real historical data
+point (the fleet's previous long-running NAS-class server), given
+directly when questioning whether 60 was still too high. The tier split
+itself (dire tiers eager, reluctant tiers low-at-rest) generalizes the
+operator's qualitative direction ("swappiness should be low, and super
+low for zswap... only push very cold pages there voluntarily"), and
+where the eager/reluctant line falls is this project's own policy
+call — but neither final resting number is just reasoned anymore: the
+eager value went through an adversarially-revised intermediate stage
+(130, down from an initial 180, this project's own call) then a further
+revision to 120 (the operator's own number); the reluctant value went
+from a plausible-sounding but unchecked 60 straight to the operator's
+own real data point, 10. The PSI-relief mechanism built around that 10
+([17]) is this project's own design, not an operator-specified value
+beyond the intent behind it.
 
 **Reasoning:** the kernel extended the swappiness range from the historical
 0-100 to 0-200, with a documented IO-cost model behind the extension: values
@@ -281,9 +288,10 @@ smallest of these), the same number sits at the worst point of that curve
 exhausted. This reasoning brought the value to 130 — still well above the
 reluctant tiers' resting value, still clearly on the "lean into zram" side,
 without paying for the last, most expensive stretch of ceiling for no
-measurable gain. Julian then revised it further, directly, to **120** — no
-additional mechanism given, and none needed: this is his own number,
-applied as stated, not a further derivation from the reasoning above.
+measurable gain. The operator then revised it further, directly, to
+**120** — no additional mechanism given, and none needed: this is the
+operator's own number, applied as stated, not a further derivation from
+the reasoning above.
 
 **Why the reluctant tiers no longer just sit at the kernel's plain
 default — this was revised again, and the revision is real, not
@@ -291,19 +299,20 @@ cosmetic.** This note previously argued a single flat 60 across 2G-128G
 was "mechanism-correct, not lazy," on the reasoning that no precedent
 tapers swappiness by RAM size the way `watermark_scale_factor` is tapered.
 That argument still holds for the SHAPE (flat, not tapered by size) — but
-60 itself turned out to be the wrong resting value once Julian directly
-questioned it: "60 is still very high. The old unraid server had 10, the
-elitebook has 25." 60 was never chosen *for* this tier group — it's simply
-the kernel's own plain, untuned default, inherited by not picking anything
-else. It was never checked against this project's own real, historical
-fleet data until asked directly. Once it was: 10 (a real prior production
-value, not a guess) and 25 (a different real production value, on a
-different medium/mode) both sit well below 60. The reluctant tiers now
-rest at **10**, with a PSI-gated relief valve (60 while pressure is
-genuinely elevated) restoring exactly the behavior 60 used to provide
-permanently — see [17]. Kernel/distro-guide precedent for a flat,
-non-tapered shape across 2G-128G still stands; the specific resting NUMBER
-does not, and 10 is directed, not a further derivation.
+60 itself turned out to be the wrong resting value once the operator
+directly questioned it: "60 is still very high. A long-running NAS-class
+server had 10, the reference laptop has 25." 60 was never chosen *for*
+this tier group — it's simply the kernel's own plain, untuned default,
+inherited by not picking anything else. It was never checked against
+this project's own real, historical fleet data until asked directly.
+Once it was: 10 (a real prior production value, not a guess) and 25 (a
+different real production value, on a different medium/mode) both sit
+well below 60. The reluctant tiers now rest at **10**, with a PSI-gated
+relief valve (60 while pressure is genuinely elevated) restoring exactly
+the behavior 60 used to provide permanently — see [17]. Kernel/distro-guide
+precedent for a flat, non-tapered shape across 2G-128G still stands; the
+specific resting NUMBER does not, and 10 is directed, not a further
+derivation.
 
 **A real limitation of the RAM-size-only tiering, stated rather than left
 silent:** "bigger boxes accumulate proportionally more file cache" is a
@@ -323,7 +332,7 @@ default to reason about workload shape it cannot see.
 **zswap (25, down from 120):** a cache miss here is a REAL disk read —
 worse than the reluctant zram case's worst case — so it should be more
 reluctant still, not less. This is no longer a reasoned midpoint: it's
-sourced from this project's own fleet. The elitebook runs zswap in
+sourced from this project's own fleet. The reference laptop runs zswap in
 production and independently converged on 25 for exactly this reason (a
 mixed LLM+browser workload that needs anonymous memory to stay resident,
 not get evicted to a disk-backed cache). Nothing in the adversarial review
@@ -333,14 +342,14 @@ this whole note.
 **Source:** kernel vm sysctl docs (swappiness 0-200 range, IO-cost
 rationale, `get_scan_count()`'s list-size-weighted scan targets); Pop!_OS
 default-settings (PR #163 lineage) for the original 180 anchor, now revised
-down; this project's own fleet (the previous Unraid server's real,
-historical 10; elitebook's real, production-tuned 25 for zswap) for the
-two directed resting values; Julian's own direct revision for the final
-120 value. The tier split, the intermediate 130 revision, and the
-reasoning connecting it to file-cache availability are nixram's own policy
-call, not sourced from any upstream guidance — confirmed by an adversarial
-research pass that no upstream precedent tapers swappiness by RAM size at
-all.
+down; this project's own fleet (the previous long-running NAS-class
+server's real, historical 10; the reference laptop's real,
+production-tuned 25 for zswap) for the two directed resting values; the
+operator's own direct revision for the final 120 value. The tier split,
+the intermediate 130 revision, and the reasoning connecting it to
+file-cache availability are nixram's own policy call, not sourced from
+any upstream guidance — confirmed by an adversarial research pass that
+no upstream precedent tapers swappiness by RAM size at all.
 
 ## [4] vm.page-cluster = 0
 
@@ -487,9 +496,9 @@ directions, worth stating plainly rather than glossing over.** An early
 version put 256M/512M in the zstd-only bucket alongside 1G with no
 recompression. That was revised, reasoning that the dire tiers must "lean
 on zram willingly" and needed a cheap primary — but this revision
-over-applied Julian's own explicit instruction, which actually said the
-opposite: "make sure that everything up to a GB goes to zstd primary and
-done... IF we encounter such a weak specimen we go for lz4 probably AND
+over-applied the operator's own explicit instruction, which actually said
+the opposite: "make sure that everything up to a GB goes to zstd primary
+and done... IF we encounter such a weak specimen we go for lz4 probably AND
 then recompress to zstd. But this is only for the weakest of weak CPU
 bound machines. And even then I am not sure." The "lz4 then recompress"
 path was a narrow, uncertain exception for the weakest possible hardware —
@@ -498,11 +507,12 @@ lz4+recompress architecture was a real implementation mistake, caught and
 reverted back to the original instruction: 256M through 1G all use
 zstd(level=3) alone.
 
-**Honesty:** directed for the architecture split itself (Julian's explicit
-instruction, quoted above) — 256M-1G go zstd-alone, 2G+ go lz4+recompress.
-Extrapolated for the specific compression settings within that split
-(`zstd(level=3)` rather than another level, `lz4` rather than `lzo-rle`),
-backed by this project's own measurements (experiments 005 and 006).
+**Honesty:** directed for the architecture split itself (the operator's
+explicit instruction, quoted above) — 256M-1G go zstd-alone, 2G+ go
+lz4+recompress. Extrapolated for the specific compression settings within
+that split (`zstd(level=3)` rather than another level, `lz4` rather than
+`lzo-rle`), backed by this project's own measurements (experiments 005
+and 006).
 
 **Reasoning, the pairing rule:** recompression's entire job is recovering
 density that a cheap primary traded away for speed. Pair it with a primary
@@ -515,25 +525,25 @@ zstd's slower decompression on every page fault while gaining almost nothing
 from the recompression pass riding along behind it. The fix is not "tune the
 level," it's "never pair the two."
 
-**Attribution, precisely — this matters here more than usual.** Julian's
-own worked examples, in his own words: "everything up to a GB goes to zstd
-primary and done" (256M/512M/1G, zstd-alone); the ~128G server uses
-lz4-then-zstd ("we should use lz4 and then zstd"), while being explicitly
-described as *reluctant* ("reluctant to take stuff to swap and only use it
-for cold stuff"). He then asked for this to be generalized ("generalize
-them... each story is an example of the more general story"). The firm
-pairing rule and the account of *why* the two groups differ are Claude's
-attempt at that generalization; the architecture split itself (where the
-line falls) is his.
+**Attribution, precisely — this matters here more than usual.** The
+operator's own worked examples, in the operator's own words: "everything
+up to a GB goes to zstd primary and done" (256M/512M/1G, zstd-alone); the
+~128G server uses lz4-then-zstd ("we should use lz4 and then zstd"),
+while being explicitly described as *reluctant* ("reluctant to take stuff
+to swap and only use it for cold stuff"). This was then generalized on
+request ("generalize them... each story is an example of the more general
+story"). The firm pairing rule and the account of *why* the two groups
+differ are this project's attempt at that generalization; the
+architecture split itself (where the line falls) is the operator's.
 
-**Resolved, directly by Julian — an earlier "reluctance" framing was wrong,
-not just incomplete.** Before this correction, an earlier version of this
-note (when 256M/512M/768M still wrongly had the lz4+recompress
+**Resolved, directly by the operator — an earlier "reluctance" framing was
+wrong, not just incomplete.** Before this correction, an earlier version
+of this note (when 256M/512M/768M still wrongly had the lz4+recompress
 architecture) tried to explain why 1G alone was zstd-only using a
 true-RAM-headroom/reluctance argument, found that story directly
 contradicted by the ~128G example (also reluctant, yet keeping
 lz4+recompression), and left it as an open, unresolved tension. Asked
-directly why 1G and ~128G differ, Julian's answer wasn't a headroom
+directly why 1G and ~128G differ, the operator's answer wasn't a headroom
 argument at all — it's a **workload compute-boundedness** argument, and it
 turns out to explain the *real* split (256M-1G vs. 2G-128G) cleanly,
 because it's about workload profile, not a single tier's headroom:
@@ -565,14 +575,14 @@ second axis, not swappiness, that decides primary-vs-recompression
 architecture.
 
 This is genuinely new information, not a refinement of the earlier
-headroom-only story — it should be read as **directed** (Julian's own
-explanation for the 1G-vs-~128G question), generalized by Claude to the
-1G/2G split itself: he described the two ends (1G, light usage; ~128G,
-compute-bound), and the placement of the actual boundary at 1G/2G rather
-than somewhere else in between is Claude's own inference, reasonably
-motivated (2G is the smallest tier where multiple concurrent
-services/workloads become the realistic norm rather than the exception)
-but not something he specified tier by tier.
+headroom-only story — it should be read as **directed** (the operator's
+own explanation for the 1G-vs-~128G question), generalized by this
+project to the 1G/2G split itself: the two ends were described (1G, light
+usage; ~128G, compute-bound), and the placement of the actual boundary at
+1G/2G rather than somewhere else in between is this project's own
+inference, reasonably motivated (2G is the smallest tier where multiple
+concurrent services/workloads become the realistic norm rather than the
+exception) but not specified tier by tier.
 
 **Reasoning, lz4 as the fast primary (every tier that pairs with
 recompression):** this project's own experiment
@@ -710,7 +720,7 @@ idle-marked and that has stayed untouched since, then marks the current
 resident set idle for the *next* idle run to act on. The timer fires
 frequently (default every 15 minutes) but only acts if CPU PSI shows the
 box is genuinely quiet right now — cadence is "whenever there is idle
-time" (Julian's explicit correction), not a fixed calendar interval.
+time" (the operator's explicit correction), not a fixed calendar interval.
 Recompression algorithm is `zstd(level=3)` (down from an earlier
 `zstd(level=12)`) — the same dense setting used as 256M-1G's primary, not a
 separate exotic level. Off at 256M, 512M, and 1G, where the primary
@@ -722,7 +732,7 @@ is already `zstd(level=3)` and [9]'s pairing rule applies; on from 2G up.
 and has no native "run when idle" unit type — userspace has to drive both.
 The two-phase timer design, the idle-gating mechanism, the check-frequency
 default, and the `zstd(level=3)` choice are all nixram's own policy
-(Julian's explicit direction where noted).
+(the operator's explicit direction where noted).
 
 **Reasoning, the two-phase design:** a naive "mark idle, then immediately
 recompress what's marked idle" in a single run would recompress the entire
@@ -771,12 +781,12 @@ going denser again.
 this design gave 256M/512M the lz4+recompression architecture,
 reasoning they were forced to "lean on zram willingly" and needed a cheap
 primary with recompression behind it. That was a real implementation
-mistake — Julian's own instruction was "everything up to a GB goes to zstd
-primary and done," with lz4-then-recompress reserved as a narrow, uncertain
-exception for the weakest possible hardware, not the default for the whole
-band (see [9]'s correction history). With that fixed, recompression has
-nothing to add at these tiers for the same reason it has nothing to add at
-1G: the primary is already dense.
+mistake — the operator's own instruction was "everything up to a GB goes
+to zstd primary and done," with lz4-then-recompress reserved as a narrow,
+uncertain exception for the weakest possible hardware, not the default
+for the whole band (see [9]'s correction history). With that fixed,
+recompression has nothing to add at these tiers for the same reason it
+has nothing to add at 1G: the primary is already dense.
 
 **Source:** kernel zram admin-guide / sysfs docs (`recompress`, `idle`
 controls, multi-compression support); kernel PSI docs (`/proc/pressure/cpu`,
@@ -823,7 +833,7 @@ sysctl layers running.
 
 **Source:** none for the specific choice to leave it on at these two tiers
 — nixram's own judgment call; the underlying compute-boundedness reasoning
-is Julian's own, quoted in full in [9].
+is the operator's own, quoted in full in [9].
 
 ## [14] PSI pressure diagnostics on zswap tiers
 
@@ -948,9 +958,10 @@ same band.
 it existed to bridge. First, 256M-1G were unified onto one zram
 architecture (`zstd(level=3)` alone, no recompression — [9]), closing the
 architecture gap directly. Second, 1G's swappiness was unified into the
-eager group too ([3]), after Julian's own compute-boundedness explanation
-put 1G with the dire tiers rather than the reluctant ones — closing the
-one remaining gap (swappiness) the anchor had been keeping separate.
+eager group too ([3]), after the operator's own compute-boundedness
+explanation put 1G with the dire tiers rather than the reluctant ones —
+closing the one remaining gap (swappiness) the anchor had been keeping
+separate.
 Checked directly: `512M` and `1G` are now identical in every formula —
 `residentLimitExpr = ram * 30 / 100`, `diskSizeExpr = ram` ([1]),
 `compressionAlgorithm = zstd(level=3)` with no recompression ([9]),
@@ -983,12 +994,13 @@ elevated, then lowers it back to 10 once the pressure has actually
 resolved.
 
 **Honesty:** directed for both the direction and the anchor values — 10
-is Julian's own real historical data point (the fleet's previous Unraid
-server ran swappiness=10), given directly when questioning whether 60 was
-still too high. The relief mechanism's existence and its purpose ("swap is
-for overflow when upgrades run or whatever, or for icecold pages") are
-also his, stated directly. The specific thresholds and check cadence
-below are Claude's own implementation, reasoned but unvalidated — a real
+is the operator's own real historical data point (the fleet's previous
+long-running NAS-class server ran swappiness=10), given directly when
+questioning whether 60 was still too high. The relief mechanism's
+existence and its purpose ("swap is for overflow when upgrades run or
+whatever, or for icecold pages") are also the operator's, stated
+directly. The specific thresholds and check cadence below are this
+project's own implementation, reasoned but unvalidated — a real
 VM test now exercises the mechanism at least once (see below), which is
 progress, not the same thing as a settled validation.
 
@@ -1001,8 +1013,8 @@ as its normal operating state (many resident services, not much
 reclaimable cache to begin with), 60 gives the kernel real license to
 reach for swap during entirely ordinary fluctuation — not because
 anything is actually wrong, just because the ratio permits it once
-reclaim happens to trigger at all. That's precisely the failure mode
-Julian flagged: "we don't want them to start swapping just because."
+reclaim happens to trigger at all. That's precisely the failure mode the
+operator flagged: "we don't want them to start swapping just because."
 
 **Why a single lower number isn't enough on its own.** A flat, very low
 swappiness (10, or even lower) makes swap-touching rare — but it doesn't
@@ -1052,7 +1064,7 @@ is deliberately reluctant.
 
 **What's still unvalidated, stated plainly:** the specific numbers (10s/
 60s pressure windows, 10%/1% thresholds, 30-second check interval, and 60
-as the relief value) are Claude's own reasoned starting points, not
+as the relief value) are this project's own reasoned starting points, not
 measured against a real workload. They're tunable per-box via the
 `zram.swappinessRelief.*` options; treat them as a first cut, not a
 settled result.
@@ -1136,13 +1148,13 @@ limitation — but it is a real, undemonstrated edge the specific threshold
 numbers above should be read alongside.
 
 **Source:** the direction (low at rest, relief valve for overflow) and the
-10 anchor are Julian's own, stated directly. The mechanism's shape reuses
-the already-verified PSI file format and awk-parsing approach from the
-recompression script ([11]); the specific thresholds are this project's
-own unvalidated judgment call. The runtime behavior described above — as
-far as it has actually been checked — comes from this project's own VM
-test (`checks/swappiness-relief-vm-test.nix`), not from any upstream
-precedent or further word from Julian.
+10 anchor are the operator's own, stated directly. The mechanism's shape
+reuses the already-verified PSI file format and awk-parsing approach from
+the recompression script ([11]); the specific thresholds are this
+project's own unvalidated judgment call. The runtime behavior described
+above — as far as it has actually been checked — comes from this
+project's own VM test (`checks/swappiness-relief-vm-test.nix`), not from
+any upstream precedent or further word from the operator.
 
 ## [18] vm.vfs_cache_pressure = 200, dire tiers only (256M/512M/1G)
 
@@ -1165,8 +1177,8 @@ The 128G-class server and vultr both sit at the plain kernel default
 **Reasoning:** this is the zswap profile's own `vfs_cache_pressure=80` note
 ([see the Zswap profile section below]) pointed in the opposite direction,
 for the opposite reason — and that contrast is the point, not a
-contradiction. Elitebook (desktop, interactive, benefits from warm
-directory/file caches for repeated re-reads) wants LOWER pressure; a
+contradiction. The reference laptop (desktop, interactive, benefits from
+warm directory/file caches for repeated re-reads) wants LOWER pressure; a
 memory-desperate 1G server (nothing to spare, no interactive user watching
 for stutter) wants HIGHER pressure, evicting non-essential caches
 aggressively rather than holding onto them. Scoped to dire tiers only
@@ -1245,17 +1257,18 @@ directly with the same RAM that running applications use, not with disk I/O
 time — a bigger pool has a real, immediate opportunity cost that the zram
 case doesn't share, so this isn't a value nixram would extrapolate past on
 its own reasoning. But it isn't nixram's own reasoning here: 30 is the
-elitebook's real production figure (raised from an intermediate 25), on the
-logic that the pool should be treated as a hot cache that churns freely
-under bursty activity rather than a conservative reservation held back from
-running applications. Directed — adapted to match the real deployment
-rather than left at the untested upstream default.
+reference laptop's real production figure (raised from an intermediate
+25), on the logic that the pool should be treated as a hot cache that
+churns freely under bursty activity rather than a conservative
+reservation held back from running applications. Directed — adapted to
+match the real deployment rather than left at the untested upstream
+default.
 
 ### Pressure duration: 3s (down from the shared 30s default)
 
-**Honesty:** directed — Julian's own instruction ("for the elitebook at
-least adapt to what it has now"), sourced from the elitebook's real
-production config.
+**Honesty:** directed — the operator's own instruction ("for the
+reference laptop at least adapt to what it has now"), sourced from the
+reference laptop's real production config.
 
 `mode = "zswap"` shortens `ManagedOOMMemoryPressureDurationSec` to 3s,
 system-wide, from the 30s value every other tier and mode shares ([10]).
@@ -1266,11 +1279,11 @@ waiting a full 30 seconds to confirm pressure is real costs more than it
 protects against. This is the one place nixram's "zram and zswap share the
 same PSI threshold" stance ([10]) turned out not to hold up against the
 real fleet data point it's supposed to be grounded in: 30s was carried over
-by default, never independently checked against elitebook's actual
-production config until asked directly. Flagged as possibly workload-specific
-rather than a general zswap-laptop fact — the real config ties it to a
-heavy-compute use case, not to "zswap" as a category — adapted here rather
-than left unverified.
+by default, never independently checked against the reference laptop's
+actual production config until asked directly. Flagged as possibly
+workload-specific rather than a general zswap-laptop fact — the real
+config ties it to a heavy-compute use case, not to "zswap" as a
+category — adapted here rather than left unverified.
 
 ### Shrinker: shrinker_enabled
 
@@ -1327,15 +1340,15 @@ dead configuration.
 
 ### Swappiness: 25
 
-**Honesty:** directed — Julian's own stated figure, sourced from the
-elitebook's real production zswap config ("the only zswap box is
-elitebook").
+**Honesty:** directed — the operator's own stated figure, sourced from the
+reference laptop's real production zswap config ("the only zswap box is
+the reference laptop").
 
 An earlier version of this profile used 120 — a reasoned midpoint between
 the plain-disk kernel default (60) and zram's eager tiers' value at the
 time (130) — but that was never verified against any real deployment. 25
-replaced it: this project's real, sourced fleet data point. The elitebook
-runs zswap in production under a mixed LLM+browser workload that needs
+replaced it: this project's real, sourced fleet data point. The reference
+laptop runs zswap in production under a mixed LLM+browser workload that needs
 anon memory to stay resident rather than get pushed to a disk-backed
 cache, and independently converged on 25 for exactly that reason.
 
@@ -1347,8 +1360,8 @@ reluctant floor was 60; 25 comfortably sits below that. Since [3] dropped
 zram's reluctant resting value to 10, 25 is now numerically ABOVE zram's
 floor, not below it — the ordering the original reasoning wanted no longer
 holds. This isn't being patched by inventing a lower zswap number: 25 is
-Julian's own real, measured production value, and the resting comparison
-point it was reasoned against (zram's old 60) is simply gone. Whether
+the operator's own real, measured production value, and the resting
+comparison point it was reasoned against (zram's old 60) is simply gone. Whether
 zswap "should" reason from zram's NEW resting value, or from its own
 relief-valve value (60, coincidentally the same number zram now uses as
 its overflow ceiling — see [17]), or continues to stand on its own
@@ -1369,10 +1382,10 @@ left untouched when it's HDD.
 
 ### Watermark scale factor: 50
 
-**Honesty:** directed — Julian: "for the elitebook at least adapt to what
-it has now." Elitebook's real production config runs 50, halved from an
-earlier 100 after a real incident (100 amplified a reclaim feedback loop
-under CPU contention).
+**Honesty:** directed — the operator: "for the reference laptop at least
+adapt to what it has now." The reference laptop's real production config
+runs 50, halved from an earlier 100 after a real incident (100 amplified
+a reclaim feedback loop under CPU contention).
 
 An earlier version of this profile reused the flat 125 that Pop!_OS itself
 validated, reasoning that the zram/server table's RAM-size taper ([5]) is
@@ -1382,36 +1395,38 @@ doesn't fit that justification, so a flat value made sense. That reasoning
 about the SHAPE (flat, not tapered) still holds, but the specific NUMBER was
 never actually checked against this project's own real zswap box until
 asked directly — 125 was a plausible-sounding substitute, not a measured
-one. 50 is what elitebook actually runs. See docs/rationale.md [5] for the
-zram-side taper this profile deliberately does NOT use.
+one. 50 is what the reference laptop actually runs. See docs/rationale.md
+[5] for the zram-side taper this profile deliberately does NOT use.
 
 ### vfs_cache_pressure: 80
 
-**Honesty:** directed — elitebook's real production value (kernel default
-is 100, the "fair rate with respect to pagecache/swapcache" point).
+**Honesty:** directed — the reference laptop's real production value
+(kernel default is 100, the "fair rate with respect to
+pagecache/swapcache" point).
 
 Lower means the kernel prefers to retain dentry/inode caches rather than
-reclaim them at the same rate as ordinary page cache — elitebook's own
-reasoning: keep some directory-structure cache warm for repeated re-reads,
-let page cache take the reclaim hit slightly first. Pairs with swappiness
-([3]) in the same "which cache gets sacrificed first" family, but is a
-narrower, independent knob (dentry/inode reclaim rate specifically, not
-anon-vs-file balance).
+reclaim them at the same rate as ordinary page cache — the reference
+laptop's own reasoning: keep some directory-structure cache warm for
+repeated re-reads, let page cache take the reclaim hit slightly first.
+Pairs with swappiness ([3]) in the same "which cache gets sacrificed
+first" family, but is a narrower, independent knob (dentry/inode reclaim
+rate specifically, not anon-vs-file balance).
 
 Zswap-only, no zram-mode equivalent: this is the only real production data
 point this project has for this sysctl at all, so it stays scoped to the
 one mode with an actual measurement behind it rather than guessed at for a
 server workload with nothing comparable to check it against.
 
-**Source:** elitebook's own real, live production config (`vm.vfs_cache_pressure`
-in its `99-swappiness.conf`).
+**Source:** the reference laptop's own real, live production config
+(`vm.vfs_cache_pressure` in its `99-swappiness.conf`).
 
 ### Overcommit memory: 1 ("always overcommit")
 
-**Honesty:** directed — elitebook's real production value (kernel default
-is 0, the "guess" heuristic). Verified against kernel source, not just the
-prose docs (see below) — worth the extra step, since it changes what this
-setting actually means for the project's own design stance.
+**Honesty:** directed — the reference laptop's real production value
+(kernel default is 0, the "guess" heuristic). Verified against kernel
+source, not just the prose docs (see below) — worth the extra step,
+since it changes what this setting actually means for the project's own
+design stance.
 
 `vm.overcommit_memory=1` tells the kernel to skip its own
 allocation-rejection heuristic entirely and let (almost) every allocation
@@ -1435,23 +1450,24 @@ this project, not something to silently decide by copying a desktop's
 value across every tier.
 
 **A companion finding, worth stating plainly since it directly bears on
-whether to extend this further:** elitebook's own live config ALSO sets
-`vm.admin_reserve_kbytes` and `vm.user_reserve_kbytes` (both 128 MiB,
-raised from kernel defaults of 8 MiB and a dynamic min(3%, 128 MiB) cap
-respectively) — but verified directly against the kernel's own
+whether to extend this further:** the reference laptop's own live config
+ALSO sets `vm.admin_reserve_kbytes` and `vm.user_reserve_kbytes` (both
+128 MiB, raised from kernel defaults of 8 MiB and a dynamic min(3%, 128
+MiB) cap respectively) — but verified directly against the kernel's own
 `__vm_enough_memory` accounting function (`mm/util.c`): under
 `OVERCOMMIT_ALWAYS` (this setting), the function returns success
 unconditionally, before either reserve value is ever read. Both sysctls
-are consulted ONLY under `overcommit_memory=2` ("never overcommit") — under
-elitebook's own live `overcommit_memory=1`, they are currently real,
-harmless, but completely inert configuration. Nixram deliberately does NOT
-set either reserve value anywhere, for exactly this reason: this project
-has no `overcommit_memory=2` use case, so propagating either would be
-cargo-culting a number that does nothing under nixram's own stance. See
-`modules/sysctls.nix`'s header comment for the same note where it's
-actually load-bearing (i.e. where a reader might otherwise reach for it).
+are consulted ONLY under `overcommit_memory=2` ("never overcommit") —
+under the reference laptop's own live `overcommit_memory=1`, they are
+currently real, harmless, but completely inert configuration. Nixram
+deliberately does NOT set either reserve value anywhere, for exactly
+this reason: this project has no `overcommit_memory=2` use case, so
+propagating either would be cargo-culting a number that does nothing
+under nixram's own stance. See `modules/sysctls.nix`'s header comment
+for the same note where it's actually load-bearing (i.e. where a reader
+might otherwise reach for it).
 
-**Source:** elitebook's own real, live production config
+**Source:** the reference laptop's own real, live production config
 (`vm.overcommit_memory` in its `99-overcommit.conf`); the mode-consultation
 behavior is verified directly against `mm/util.c`'s `__vm_enough_memory`,
 not just `Documentation/admin-guide/sysctl/vm.rst` (whose prose is a little

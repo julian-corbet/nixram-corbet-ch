@@ -159,7 +159,7 @@ in
       description = ''
         Escape hatch: override the level's primary (synchronous, write-path)
         compression algorithm. Level defaults: `zstd(level=3)` with no
-        recompression at all at 256M/512M/1G (Julian's own instruction:
+        recompression at all at 256M/512M/1G (the operator's own instruction:
         "everything up to a GB goes to zstd primary and done"); `lz4`
         paired with `zstd(level=3)` recompression from 2G up -- see
         docs/rationale.md [9] for why the split falls at the 1G/2G
@@ -196,7 +196,7 @@ in
       description = ''
         systemd OnCalendar= expression for how often the recompression
         timer CHECKS whether to act -- not how often it actually
-        recompresses. Cadence is idle-gated (Julian's explicit policy:
+        recompresses. Cadence is idle-gated (the operator's explicit policy:
         "whenever there is idle time", not a fixed schedule): every firing
         reads CPU PSI first and does nothing unless the box is genuinely
         quiet right now, so a busy box simply defers to its next idle
@@ -216,7 +216,7 @@ in
         Ships a systemd timer that watches memory PSI and temporarily
         raises `vm.swappiness` above the level's low reluctant baseline
         during genuine, sustained memory pressure -- then lowers it back
-        once the pressure has genuinely passed. Julian's own design
+        once the pressure has genuinely passed. the operator's own design
         intent: "swap is for overflow when upgrades run or whatever, or
         for icecold pages" -- a low static swappiness serves that on its
         own most of the time, but a real overflow event (a deploy spike,
@@ -281,7 +281,7 @@ in
     zswap.maxPoolPercent = mkOption {
       type = types.ints.between 1 100;
       default = 30;
-      description = "Percent of total RAM the compressed zswap pool may occupy. The kernel's own upstream default is 20, deliberately not raised on the reasoning that the zswap pool competes with the SAME RAM as running applications, not disk I/O, so a bigger pool has a real opportunity cost -- but this project's own real zswap box (elitebook) runs 30 in production (raised from 25), treating the pool as a hot cache that should churn on bursty activity rather than a conservative reservation. Directed: adapted to match the real deployment rather than the untested upstream default.";
+      description = "Percent of total RAM the compressed zswap pool may occupy. The kernel's own upstream default is 20, deliberately not raised on the reasoning that the zswap pool competes with the SAME RAM as running applications, not disk I/O, so a bigger pool has a real opportunity cost -- but this project's own real zswap box (the reference laptop) runs 30 in production (raised from 25), treating the pool as a hot cache that should churn on bursty activity rather than a conservative reservation. Directed: adapted to match the real deployment rather than the untested upstream default.";
     };
 
     zswap.acceptThresholdPercent = mkOption {

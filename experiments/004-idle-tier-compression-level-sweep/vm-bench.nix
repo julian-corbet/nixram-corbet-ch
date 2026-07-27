@@ -6,7 +6,7 @@
 # needed a kernel module load (`modprobe zram`) on a live, shared machine.
 # Corrected after direct feedback: kernel/device experiments belong in a
 # disposable VM, never on a real host, even when the specific action looks
-# safe (see feedback_vm_experiments_not_live_host in Claude's own memory).
+# safe (see feedback_vm_experiments_not_live_host in this project's own memory).
 # Everything below -- the zram module, the corpora, the benchmark -- exists
 # only inside the ephemeral guest and is discarded when the build finishes.
 #

@@ -465,7 +465,7 @@ let
       "kernelParams: ${builtins.toJSON cfg-mode-zswap.boot.kernelParams}")
 
     # --- mode-zswap ------------------------------------------------------
-    # Values here match elitebook's real production deployment, not the
+    # Values here match the reference laptop's real production deployment, not the
     # untested upstream/Pop!_OS defaults -- rationale.md [5], [10].
     (check "mode-zswap/kernel-params"
       (lib.all (p: lib.elem p cfg-mode-zswap.boot.kernelParams) [

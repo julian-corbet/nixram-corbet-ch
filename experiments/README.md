@@ -76,11 +76,12 @@ tier?
 — Pop!_OS's own zram default and nixram's very first, single flat value,
 before the eager/reluctant tier split existed. 180 is no longer used
 anywhere in the project: the eager tiers (256M/512M/1G) moved 180 → 130
-(adversarially revised) → 120 (Julian's own further direct revision), while
-the reluctant tiers (2G-128G) moved straight from the kernel's plain 60
-default to 10 at rest (Julian's own real historical data point, the fleet's
-old Unraid server), now paired with a PSI-gated relief valve that
-temporarily raises swappiness to 60 during genuine, sustained pressure. The
+(adversarially revised) → 120 (the operator's own further direct revision),
+while the reluctant tiers (2G-128G) moved straight from the kernel's plain
+60 default to 10 at rest (the operator's own real historical data point, a
+long-running NAS-class server that ran 10), now paired with a PSI-gated
+relief valve that temporarily raises swappiness to 60 during genuine,
+sustained pressure. The
 reluctant tiers' resting value is no longer an open sweep target in the
 original sense — 10 is a directed data point, not an extrapolation needing
 this kind of validation. What remains genuinely open is whether the eager

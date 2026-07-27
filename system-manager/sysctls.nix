@@ -10,20 +10,20 @@
 # Rendered as a single `environment.etc."sysctl.d/90-nixram.conf"` file
 # instead, `replaceExisting = true` (system-manager silently no-ops an
 # `environment.etc` entry without this whenever the target path already
-# exists on disk -- see infra's own knowledge/fleet/elitebook/declarative-config.md
+# exists on disk -- see the reference deployment's own notes
 # "Trap 1"), plus a bridge unit that re-triggers systemd-sysctl.service when
 # the file's content changes. Writing the file is not applying it:
 # systemd-sysctl only reads sysctl.d at boot, so without the bridge a changed
 # value would sit on disk, inert, until the next reboot -- the exact pattern
-# elitebook's own hand-written memory.nix already uses for this same problem.
+# the reference laptop's own hand-written memory.nix already uses for this same problem.
 #
 # The "90" prefix is load-bearing, not cosmetic: CachyOS ships its own
 # `/usr/lib/sysctl.d/70-cachyos-settings.conf` with its own swappiness/
-# vfs_cache_pressure values -- confirmed live on elitebook, not assumed.
+# vfs_cache_pressure values -- confirmed live on the reference laptop, not assumed.
 # systemd-sysctl applies sysctl.d files in lexical order and the LAST one
 # wins for any given key, so a file sorting before 70 would be silently
 # overridden by the distro default, defeating this whole layer with no
-# error. elitebook's own memory.nix already discovered this the hard way
+# error. the reference laptop's own memory.nix already discovered this the hard way
 # (its own files are numbered 90/95/99 for exactly this reason) -- 90
 # here matches that same, already-proven-necessary convention.
 #
@@ -71,14 +71,14 @@ let
   sysctlLines = lib.concatStringsSep "\n" (
     [
       "vm.watermark_boost_factor = 0" # sourced -- rationale.md [5]
-      "vm.watermark_scale_factor = ${toString zswapWatermarkScaleFactor}" # directed -- elitebook's real production value
+      "vm.watermark_scale_factor = ${toString zswapWatermarkScaleFactor}" # directed -- the reference laptop's real production value
     ]
     ++ (
       if cfg.mode == "zswap" then
         [
           "vm.swappiness = ${toString zswapSwappiness}" # directed -- rationale.md [3]
-          "vm.vfs_cache_pressure = ${toString zswapVfsCachePressure}" # directed -- elitebook's real value
-          "vm.overcommit_memory = ${toString zswapOvercommitMemory}" # directed -- elitebook's real value
+          "vm.vfs_cache_pressure = ${toString zswapVfsCachePressure}" # directed -- the reference laptop's real value
+          "vm.overcommit_memory = ${toString zswapOvercommitMemory}" # directed -- the reference laptop's real value
         ]
         ++ optional (zswapPageCluster != null) "vm.page-cluster = ${toString zswapPageCluster}"
       else
@@ -103,7 +103,7 @@ in
     # `environment.etc` file a unit merely reads has changed. restartTriggers
     # renders the sysctl file's store path INTO this unit, so this unit's own
     # path moves whenever the file's content changes -- exactly the diff the
-    # engine acts on. Same pattern as elitebook's own memory.nix
+    # engine acts on. Same pattern as the reference laptop's own memory.nix
     # `sysctl-reapply` unit.
     systemd.services.nixram-sysctl-reapply = {
       description = "Re-apply /etc/sysctl.d/90-nixram.conf after a declarative change (systemd-sysctl is boot-only)";

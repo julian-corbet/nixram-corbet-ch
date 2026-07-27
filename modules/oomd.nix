@@ -65,7 +65,7 @@ let
   activeLevelName = if cfg.level != null then cfg.level else builtins.head levelNames;
   activeLevel = levels.${activeLevelName};
 
-  # directed -- Julian: "for the elitebook at least adapt to what it has
+  # directed -- the operator: "for the the reference laptop at least adapt to what it has
   # now." zswap's real deployment cut the duration to 3s (from the 30s
   # shared default) system-wide, specifically to react faster under a
   # bursty compute (LLM-load) workload -- this is the one place nixram's

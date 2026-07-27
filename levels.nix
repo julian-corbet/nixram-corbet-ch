@@ -13,12 +13,12 @@
 #   sourced      a real upstream distro/kernel-doc default or bound,
 #                applied as-is, or a formula whose ENDPOINTS are sourced
 #                (the endpoints, not necessarily the taper between them).
-#   directed     a literal value Julian himself stated (quoted or closely
-#                paraphrased in rationale.md), applied as-is. Not Claude's
+#   directed     a literal value the operator specified (quoted or closely
+#                paraphrased in rationale.md), applied as-is. Not this project's
 #                inference -- the number itself is his.
-#   extrapolated Claude's own curve, cap, boundary placement, or causal
+#   extrapolated this project's own curve, cap, boundary placement, or causal
 #                story standing on or between sourced/directed anchors.
-#                Reasoned, not measured, and NOT something Julian said --
+#                Reasoned, not measured, and NOT something the operator said --
 #                see rationale.md for exactly where the directed data
 #                point(s) end and the extrapolation begins.
 #   default      the kernel's own computed value, deliberately left
@@ -36,7 +36,7 @@
 # documentation recommends zram-size fractions "in the range 0.1-0.5" of
 # RAM. Every tier here exceeds that range: `diskSizeExpr` is the tier's own
 # `residentLimitExpr` budget, multiplied by `pi()`, rounded to the nearest
-# "RAM-buyable" size -- Julian's own formula: "take the physical ram,
+# "RAM-buyable" size -- the operator's own formula: "take the physical ram,
 # multiply by pi and take the nearest base 2ish value." Concretely, that
 # means the nearest 3-smooth number (OEIS A003586, only 2 and 3 as prime
 # factors -- the sizes RAM/VPS tiers actually ship in: 256M, 384M, 512M,
@@ -52,7 +52,7 @@
 # arbitrary, non-fixed ratio. This lands well above upstream's 0.5-of-RAM
 # ceiling at every tier (256 MiB at 256M, up to 96 GiB at 128G) --
 # deliberate, not an oversight, and it produces round, human-legible
-# numbers that also land inside or right at the edge of Julian's own
+# numbers that also land inside or right at the edge of the operator's own
 # hand-calculated examples (e.g. 1G: 1 GiB ceiling vs. his own "almost a
 # GB"; ~128G: 96 GiB, exactly his own correction).
 # Under nixram's resident-limit model, disksize is only the VIRTUAL
@@ -80,7 +80,7 @@
       zram = {
         diskSizeExpr = "ram";
         # extrapolated -- ceiling = resident-limit budget (30%) x pi(),
-        # rounded to the nearest "RAM-buyable" size (Julian's own formula:
+        # rounded to the nearest "RAM-buyable" size (the operator's own formula:
         # "take the physical ram, multiply by pi and take the nearest base
         # 2ish value" -- a 3-smooth number, OEIS A003586: only 2 and 3 as
         # prime factors, the sizes RAM/VPS tiers actually ship in: 256M,
@@ -89,18 +89,18 @@
         # so the formula collapses to plain `ram`, not a coincidence, a
         # provable consequence of the ratio being fixed within this tier
         # group (see docs/rationale.md [1] for the derivation and the
-        # check against all four of Julian's worked examples).
+        # check against all four of the operator's worked examples).
         residentLimitExpr = "ram * 30 / 100";
-        # directed -- 30% is Julian's own stated figure at this tier
+        # directed -- 30% is the operator's own stated figure at this tier
         # ("Taking off 75MB for ZRAM" at 256M is ~30%; matched at 512M's
         # "we take 30% for virtual RAM"), NOT the memory-safety headroom
         # argument the old ram/2 (50%) value was reasoned from. Same
         # 20-30% band as zswap.maxPoolPercent -- the two modes share this
         # leg; only what sits behind it differs. The zram-resident-limit
         # PRIMITIVE is sourced (systemd/zram-generator upstream); this
-        # fraction is Julian's own choice. See docs/rationale.md [2].
+        # fraction is the operator's own choice. See docs/rationale.md [2].
         compressionAlgorithm = "zstd(level=3)";
-        # directed -- Julian's explicit instruction: "make sure that
+        # directed -- the operator's explicit instruction: "make sure that
         # everything up to a GB goes to zstd primary and done." An
         # earlier version of this file wrongly gave 256M/512M a
         # lz4+recompress architecture instead, over-applying his separate,
@@ -118,7 +118,7 @@
       };
 
       swappiness = 120;
-      # directed -- Julian revised this down from 130 (itself already
+      # directed -- the operator revised this down from 130 (itself already
       # adversarially revised down from an initial 180). The EAGER value:
       # once file cache is genuinely near-empty (true here), the anon:file
       # scan-target math collapses toward anon regardless of the exact
@@ -156,8 +156,8 @@
       ramMiB = 512;
       zram = {
         diskSizeExpr = "ram";  # extrapolated -- [1], 30% budget x pi ~= 0.94, nearest 3-smooth fraction = 1.0 (ram itself)
-        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], Julian's own 30% figure ("we take 30% for virtual RAM")
-        compressionAlgorithm = "zstd(level=3)"; # directed, Julian: "everything up to a GB goes to zstd primary and done" -- [9]
+        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], the operator's own 30% figure ("we take 30% for virtual RAM")
+        compressionAlgorithm = "zstd(level=3)"; # directed, the operator: "everything up to a GB goes to zstd primary and done" -- [9]
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
         # 256M-1G all share this shape now -- see the 256M block above for
@@ -181,8 +181,8 @@
       ramMiB = 1024;
       zram = {
         diskSizeExpr = "ram";  # extrapolated -- [1], 30% budget x pi ~= 0.94, nearest 3-smooth fraction = 1.0 (ram itself)
-        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], Julian's own 30% figure (e2-micro walkthrough)
-        compressionAlgorithm = "zstd(level=3)"; # directed -- [9], Julian: "we go for zstd directly"
+        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], the operator's own 30% figure (e2-micro walkthrough)
+        compressionAlgorithm = "zstd(level=3)"; # directed -- [9], the operator: "we go for zstd directly"
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
         # zstd-primary/no-recompression -- 256M-1G all share this shape
@@ -193,13 +193,13 @@
       };
       swappiness = 120;
       # directed -- EAGER, unified with 256M/512M (previously
-      # 10/reluctant, revised after Julian's own compute-boundedness
+      # 10/reluctant, revised after the operator's own compute-boundedness
       # explanation: "with 1GB RAM, you need to get whatever you can"
       # describes urgency, not comfort -- the same "light usage,
       # RAM-desperate" story that justifies 256M/512M's eager value applies
       # here too, not the "enough true RAM to wait" story the reluctant
       # value was reasoned from. Reluctant (10) now starts at 2G, not 1G.
-      # 120 is Julian's own revision down from 130. rationale.md [3].
+      # 120 is the operator's own revision down from 130. rationale.md [3].
       swappinessReliefEnableByDefault = false;
       # extrapolated -- [3], no relief valve needed, dire tiers already eager
       watermarkScaleFactor = 200;   # extrapolated -- [5]
@@ -218,7 +218,7 @@
       zram = {
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         # extrapolated, own-measured -- [1]. 25% resident budget x pi(),
-        # rounded to the nearest 3-smooth "RAM-buyable" fraction (Julian's
+        # rounded to the nearest 3-smooth "RAM-buyable" fraction (the operator's
         # own formula -- collapses to a flat 0.75, see the file header). No
         # longer Fedora's plain "ram" default -- that formula was
         # disconnected from the actual resident budget. rationale.md [1].
@@ -233,7 +233,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -256,7 +256,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -279,7 +279,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -302,7 +302,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -325,7 +325,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 125;
       # sourced -- the one flat value Pop!_OS actually validated.
@@ -350,7 +350,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -373,7 +373,7 @@
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -391,16 +391,16 @@
       zram = {
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 20 / 100";
-        # extrapolated -- [2]. The 20% VALUE is Julian's stated figure
+        # extrapolated -- [2]. The 20% VALUE is the operator's stated figure
         # (given for ~128G); WHERE the 25%->20% step begins (24G, not
-        # 32G or 64G) is Claude's own placement, not something Julian
+        # 32G or 64G) is this project's own placement, not something the operator
         # specified -- flagged as unconfirmed, not "his correction."
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -417,13 +417,13 @@
       ramMiB = 32768;
       zram = {
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 20 / 100";  # extrapolated -- [2], 20% is Julian's figure; the 24G start is Claude's placement
+        residentLimitExpr = "ram * 20 / 100";  # extrapolated -- [2], 20% is the operator's figure; the 24G start is this project's placement
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -449,10 +449,10 @@
         # 48 GiB at this tier. See docs/rationale.md [1].
         residentLimitExpr = "ram * 20 / 100";
         # extrapolated -- closes what was an open question (previously
-        # unset/unlimited here). 20% is Julian's stated figure for this
+        # unset/unlimited here). 20% is the operator's stated figure for this
         # tier. The "CPU-tax budget, not memory-safety backstop" framing
-        # is Claude's own explanation for why it applies here too --
-        # 20% here is Julian's own explicit figure ("taking a 20% slice
+        # is this project's own explanation for why it applies here too --
+        # 20% here is the operator's own explicit figure ("taking a 20% slice
         # of system RAM here is about 25GB"), same as 24G/32G, not a
         # further taper. See docs/rationale.md [2].
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
@@ -464,7 +464,7 @@
         # rationale.md [13].
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 100;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
@@ -480,14 +480,14 @@
     "128G" = {
       ramMiB = 131072;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi rounds to the 0.75 3-smooth fraction -- 96 GiB here, Julian's own directed correction (was 64 GiB under plain power-of-two rounding)
-        residentLimitExpr = "ram * 20 / 100";  # directed -- [2], Julian's own figure ("a 20% slice... about 25GB")
-        compressionAlgorithm = "lz4";           # directed, Julian: "we should use lz4 and then zstd" -- [9]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi rounds to the 0.75 3-smooth fraction -- 96 GiB here, the operator's own directed correction (was 64 GiB under plain power-of-two rounding)
+        residentLimitExpr = "ram * 20 / 100";  # directed -- [2], the operator's own figure ("a 20% slice... about 25GB")
+        compressionAlgorithm = "lz4";           # directed, the operator: "we should use lz4 and then zstd" -- [9]
         recompressionAlgorithm = "zstd(level=3)";
         recompressionTimerEnableByDefault = true;  # extrapolated, low value -- [13]
         priority = 100;                              # sourced -- [12]
       };
-      swappiness = 10;              # directed -- [3], Julian's own real historical data point (the old Unraid server ran 10)
+      swappiness = 10;              # directed -- [3], the operator's own real historical data point (a long-running NAS-class server ran 10)
       swappinessReliefEnableByDefault = true; # extrapolated -- [3], PSI-gated relief valve, reluctant tiers only
       watermarkScaleFactor = 100;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]

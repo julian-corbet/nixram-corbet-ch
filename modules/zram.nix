@@ -68,7 +68,7 @@ let
 
   # The recompression maintenance script: a rolling two-phase design,
   # gated on actual system idleness rather than run unconditionally on a
-  # fixed schedule (Julian's explicit correction -- cadence should be
+  # fixed schedule (the operator's explicit correction -- cadence should be
   # "whenever there is idle time", not a fixed calendar interval). The
   # timer fires often (see recompressionTimer.onCalendar's new default);
   # each firing checks CPU PSI first and does nothing at all unless the
@@ -127,7 +127,7 @@ let
     echo "all" > "$dev/idle"
   '';
 
-  # PSI-gated swappiness relief valve. Julian's own design intent: hold
+  # PSI-gated swappiness relief valve. the operator's own design intent: hold
   # swappiness LOW at rest (reluctant tiers: only cache eviction, never
   # anon, under normal fluctuation), but let the kernel actually use swap
   # once a real overflow event is underway -- "swap is for overflow when

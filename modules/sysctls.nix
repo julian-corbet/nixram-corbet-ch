@@ -24,13 +24,13 @@
 # levels.nix's per-tier `swappiness` field and rationale.md [3].
 #
 # DELIBERATELY NOT SETTING `vm.admin_reserve_kbytes` / `vm.user_reserve_kbytes`
-# ANYWHERE, even though elitebook's own real config sets both. Verified
+# ANYWHERE, even though the reference laptop's own real config sets both. Verified
 # directly against the kernel's own `__vm_enough_memory` accounting logic
 # (mm/util.c): both reserve values are ONLY consulted under
 # `overcommit_memory=2` ("never overcommit") -- under `overcommit_memory=1`
 # (nixram's own zswap-mode value, see `zswapOvercommitMemory` below) the
 # function returns success unconditionally before either reserve is ever
-# read. Elitebook's own live 131072/131072 values are therefore currently
+# read. the reference laptop's own live 131072/131072 values are therefore currently
 # INERT given its own overcommit_memory=1 -- real, harmless dead
 # configuration, not a bug, but not something to propagate into nixram as
 # a "working" default either. Setting either reserve here would be cargo
@@ -50,12 +50,12 @@ let
   activeLevelName = if cfg.level != null then cfg.level else builtins.head levelNames;
   activeLevel = levels.${activeLevelName};
 
-  # zswap's own flat swappiness -- directed, not extrapolated: Julian
-  # named 25 directly ("the only zswap box is elitebook"), reversing an
+  # zswap's own flat swappiness -- directed, not extrapolated: the operator
+  # named 25 directly ("the only zswap box is the reference laptop"), reversing an
   # earlier reasoned-midpoint value of 120. A zswap cache miss is a REAL
   # disk read, worse than the reluctant zram tiers' worst case, so it
   # should be more reluctant still, not less -- and it's this project's
-  # one real production data point: the elitebook runs zswap live and
+  # one real production data point: the the reference laptop runs zswap live and
   # independently converged on 25 for exactly this reason (a mixed
   # LLM+browser workload that needs anon memory to stay resident, not
   # get pushed to a disk-backed cache). See docs/rationale.md [3].
@@ -68,22 +68,22 @@ let
   # default (3, left untouched) for HDD swap.
   zswapPageCluster = if cfg.zswap.diskMedium == "ssd" then 2 else null;
 
-  # directed -- Julian: "for the elitebook at least adapt to what it has
+  # directed -- the operator: "for the the reference laptop at least adapt to what it has
   # now." An earlier version of this profile reused the Pop!_OS-validated
   # flat 125, reasoning the server table's RAM-size taper doesn't apply
   # to a laptop/desktop's shorter-lived, interactive pressure pattern --
   # a plausible argument, but it was never actually checked against this
-  # project's own real zswap box. It now is: elitebook runs 50 in
+  # project's own real zswap box. It now is: the reference laptop runs 50 in
   # production (halved from an earlier 100, after a real incident where
   # 100 amplified a reclaim feedback loop under CPU contention). 50 is
   # this project's own real, incident-tested data point; 125 was a
   # plausible-sounding but unverified substitute. See docs/rationale.md [5].
   zswapWatermarkScaleFactor = 50;
 
-  # directed -- elitebook's real production value (kernel default is 100,
+  # directed -- the reference laptop's real production value (kernel default is 100,
   # the "fair rate with respect to pagecache/swapcache" point). Lower means
   # the kernel prefers to retain dentry/inode caches rather than reclaim
-  # them at the same rate as page cache -- elitebook's own reasoning: keep
+  # them at the same rate as page cache -- the reference laptop's own reasoning: keep
   # some file cache for warm rereads, let page cache take the reclaim hit
   # slightly first. No zram-mode equivalent: this is the only real
   # production data point this project has for this sysctl at all, so it
@@ -92,7 +92,7 @@ let
   # swappiness reasoning this pairs with.
   zswapVfsCachePressure = 80;
 
-  # directed -- elitebook's real production value (kernel default is 0,
+  # directed -- the reference laptop's real production value (kernel default is 0,
   # "guess" heuristic mode). Verified against the kernel's own
   # `__vm_enough_memory` accounting logic (mm/util.c): OVERCOMMIT_ALWAYS
   # (1) returns success unconditionally, before any reserve accounting

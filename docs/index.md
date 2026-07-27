@@ -37,8 +37,8 @@ Two distinct audiences, one module:
   for why the latter is actively misleading under nixram's own sizing model.
 - **An honesty taxonomy, not a wall of opinions.** Every value is tagged
   sourced (●), directed (◆), extrapolated (◐), or kernel default (○).
-  Directed means a literal value Julian himself stated, applied as-is —
-  not Claude's inference. Extrapolated values are reasoned, not measured,
+  Directed means a literal value the operator specified, applied as-is —
+  not inferred by this project. Extrapolated values are reasoned, not measured,
   and said so out loud — see [rationale.md](rationale.md).
 - **A relief valve for genuine pressure, not a static number.** The
   reluctant tiers (2G-128G) hold `vm.swappiness` low (10) at rest, but a

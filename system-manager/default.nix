@@ -6,9 +6,9 @@
 # rebuild. Reuses the exact same levels.nix as the NixOS modules; only HOW
 # each value gets applied to the running system differs.
 #
-# WHY THIS EXISTS: elitebook (CachyOS) already runs a real, working zswap
+# WHY THIS EXISTS: the reference laptop (CachyOS) already runs a real, working zswap
 # profile matching this project's own defaults, applied through a hand-written
-# system-manager module (infra/hosts/elitebook/memory.nix) -- because nixram
+# system-manager module (a real hand-written system-manager memory config) -- because nixram
 # itself had no system-manager target to import instead. This closes that gap
 # for `mode = "zswap"` (the profile that box, and this project's other
 # CachyOS-family targets, actually run).
@@ -30,7 +30,7 @@
 #     `environment.etc."sysctl.d/*.conf"` file, which IS supported, plus a
 #     bridge unit that re-triggers systemd-sysctl.service when the file
 #     changes (systemd-sysctl only runs at boot otherwise) -- the exact
-#     pattern elitebook's own hand-written memory.nix already proved out.
+#     pattern the reference laptop's own hand-written memory.nix already proved out.
 #   - `services.zram-generator` -- a NixOS-specific systemd-generator
 #     integration, not vendored here. `mode = "zram"` is therefore NOT
 #     supported under this backend at all (see the assertion below) --
@@ -47,7 +47,7 @@
 # configuration (modules/oomd.nix's whole approach) ports over almost
 # verbatim. `systemd.tmpfiles.rules` is the exact same option NixOS has (used
 # here for the MGLRU min_ttl_ms rule). `environment.etc.<path>.text` +
-# `replaceExisting` is how elitebook's memory.nix already writes sysctl.d
+# `replaceExisting` is how the reference laptop's memory.nix already writes sysctl.d
 # files. `system-manager.preActivationAssertions.<name>.script` is a real,
 # supported mechanism for a runtime check that fails activation outright --
 # used here for the zswap-boot-params verification above.
@@ -79,7 +79,7 @@ in
     level = mkOption {
       type = types.nullOr (types.enum levelNames);
       default = null;
-      example = "elitebook's real level, e.g. \"24G\" or \"32G\"";
+      example = "the reference laptop's real level, e.g. \"24G\" or \"32G\"";
       description = ''
         Same option, same fourteen anchor levels, same "no eval-time auto"
         stance as the NixOS module (`modules/default.nix`) -- see that
@@ -106,7 +106,7 @@ in
       maxPoolPercent = mkOption {
         type = types.ints.between 1 100;
         default = 30;
-        description = "Same option and same default as the NixOS module's `zswap.maxPoolPercent` -- see modules/default.nix for the full reasoning (elitebook's real production value, raised from the kernel's own 20).";
+        description = "Same option and same default as the NixOS module's `zswap.maxPoolPercent` -- see modules/default.nix for the full reasoning (the reference laptop's real production value, raised from the kernel's own 20).";
       };
 
       acceptThresholdPercent = mkOption {

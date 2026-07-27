@@ -21,8 +21,8 @@
 #     auto-fix" philosophy applied here).
 #   - CachyOS ships a udev rule (`/usr/lib/udev/rules.d/30-zram.rules`) that
 #     DISABLES zswap the moment it detects any zram device -- confirmed
-#     directly from elitebook's own knowledge base
-#     (knowledge/fleet/elitebook/responsiveness.md). A box can have the right
+#     directly from the reference laptop's own knowledge base
+#     (the reference deployment's own notes). A box can have the right
 #     cmdline params AND still end up with zswap silently off if that rule
 #     isn't overridden. This check's failure message names that gotcha
 #     explicitly, not just "add these cmdline params" -- the same class of
@@ -115,7 +115,7 @@ let
       echo "distro sharing its cachyos-settings package), check for a udev rule that disables" >&2
       echo "zswap whenever a zram device is detected --" >&2
       echo "/usr/lib/udev/rules.d/30-zram.rules. Override it with an EMPTY file at" >&2
-      echo "/etc/udev/rules.d/30-zram.rules (same fix elitebook's own real deployment uses)." >&2
+      echo "/etc/udev/rules.d/30-zram.rules (same fix the reference laptop's own real deployment uses)." >&2
       exit 1
     fi
 

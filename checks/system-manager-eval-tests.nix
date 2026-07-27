@@ -3,7 +3,7 @@
 # EVAL-TIME tests for the system-manager backend (system-manager/*.nix).
 # Same spirit as checks/default.nix's NixOS eval-tests -- no VM, no build:
 # evaluates a real system-manager configuration via system-manager's own
-# `lib.makeSystemConfig` (the same function real hosts like elitebook use)
+# `lib.makeSystemConfig` (the same function real hosts like the reference laptop use)
 # and inspects what it RENDERS into `config`/`options`. These confirm the
 # module renders the right `environment.etc`/`systemd.slices`/etc entries;
 # they say nothing about runtime behavior on a real activated host.
@@ -43,7 +43,7 @@ let
     services.nixram.zswap.maxPoolPercent = 40;
   };
   # A host adopting nixram's sysctls while keeping its OWN existing,
-  # differently-shaped oomd setup for now (e.g. elitebook's first rollout).
+  # differently-shaped oomd setup for now (e.g. the reference laptop's first rollout).
   cfg-oomd-disabled = evalFor {
     services.nixram.level = "24G";
     services.nixram.oomd.enable = false;
@@ -131,7 +131,7 @@ let
     (check "sm-24G/sysctl-file-sorts-after-distro-defaults"
       # Regression guard: CachyOS ships its own conflicting sysctl values in
       # /usr/lib/sysctl.d/70-cachyos-settings.conf (confirmed live on
-      # elitebook) -- systemd-sysctl's last-file-wins ordering means
+      # the reference laptop) -- systemd-sysctl's last-file-wins ordering means
       # anything sorting before "70" would be silently overridden. "90" is
       # not a magic number to preserve for its own sake; the REAL
       # requirement is "later than 70".

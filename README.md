@@ -128,8 +128,8 @@ system-manager's smaller, real option surface instead of NixOS's:
   system-manager doesn't have. Use the NixOS module for a zram target, or
   `mode = "zswap"` / `"none"` here.
 - The `vm.*` sysctls (swappiness, watermarks, page-cluster, `vfs_cache_pressure`,
-  `overcommit_memory` — the last two directed from elitebook's real
-  production config, see [docs/rationale.md](docs/rationale.md#vfs_cache_pressure-80))
+  `overcommit_memory` — the last two directed from the reference laptop's
+  real production config, see [docs/rationale.md](docs/rationale.md#vfs_cache_pressure-80))
   are applied via a plain `/etc/sysctl.d/90-nixram.conf` file plus a
   re-apply bridge unit, since system-manager has no `boot.kernel.sysctl`
   abstraction — same real effect, different mechanism.
