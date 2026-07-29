@@ -34,6 +34,20 @@ let
   declaredResident = zcfg.zram-resident-limit or null;
   declaredAlgo = zcfg.compression-algorithm or null;
 
+  # The PRIMARY algorithm is the first whitespace-separated token of compression-algorithm, minus
+  # any "(param=...)" suffix: "lz4 zstd(level=3) (type=idle)" declares lz4 as primary with an idle
+  # recompression pass behind it.
+  #
+  # Computed HERE, at eval time, and not by piping the literal through `awk` at runtime -- see the
+  # PATH note above the script. The string is a build-time constant; there was never a reason to
+  # recompute it on every boot, and doing so is what put a text-processing tool on the critical
+  # path of a check whose whole job is to be trustworthy.
+  declaredPrimaryAlgo =
+    if declaredAlgo == null then
+      null
+    else
+      lib.head (lib.splitString "(" (lib.head (lib.splitString " " declaredAlgo)));
+
   # nixram emits exactly two shapes for these expressions -- `ram`, or `ram * N / M` -- because the
   # ratio is fixed per tier group and collapses to a flat fraction (see levels.nix's own note on
   # why the pi()/3-smooth machinery is not needed at runtime). The check parses those two and
@@ -95,6 +109,18 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
       };
+      # NOTHING BELOW MAY CALL A BINARY OUTSIDE SYSTEMD'S DEFAULT UNIT PATH, and this unit
+      # deliberately declares no `path`. NixOS gives a unit coreutils, findutils, gnugrep, gnused,
+      # systemd and util-linux -- and NOT gawk. An earlier version parsed mm_stat and the declared
+      # algorithm with `awk`; on a real host every one of those calls died with "awk: command not
+      # found", `lim` and `want` came back empty, and the check reported RESIDENT LIMIT NOT APPLIED
+      # and ALGORITHM MISMATCH against a device that matched the declaration exactly.
+      #
+      # That is the worst failure a checker has. A check that cannot run must not be able to
+      # manufacture the very drift it exists to detect -- the operator's next move is to `swapoff`
+      # a live swap device on a box under memory pressure, on the strength of a broken `$4`. So the
+      # parsing is bash builtins and eval-time constants, with `sed` (guaranteed present) the only
+      # external call left. Adding a tool here means adding `path` too.
       script = ''
         dev=/sys/block/${cfg.zram.driftCheck.device}
         drift=0
@@ -130,7 +156,14 @@ in
           # (Found the hard way: the first version of this check did read mem_limit, and a
           # hand-built fake sysfs with a readable file hid the bug that a real box exposed in
           # one command.)
-          lim=$(awk '{print $4}' "$dev/mm_stat" 2>/dev/null || echo "")
+          lim=""
+          if [ -r "$dev/mm_stat" ]; then
+            # Field 4 of mm_stat, via bash's own field splitting -- no external text tool; see
+            # the PATH note on this script. `|| :` because `read` returns non-zero on a
+            # short/EOF-terminated line and `set -e` would take the script down with it; an
+            # unreadable value must fall through to the report below, not abort.
+            read -r _ _ _ lim _ < "$dev/mm_stat" || :
+          fi
           # Presence, not exactness: the kernel page-aligns this one and the arithmetic path
           # differs from disksize's, so a byte comparison is not meaningful. What matters is
           # whether a limit exists at all -- 0 means "no limit", which is the failure mode.
@@ -146,7 +179,7 @@ in
         ${lib.optionalString (declaredAlgo != null) ''
           # comp_algorithm lists every algorithm with the ACTIVE one in [brackets].
           active=$(sed -n 's/.*\[\([^]]*\)\].*/\1/p' "$dev/comp_algorithm" 2>/dev/null || echo "")
-          want=$(echo ${lib.escapeShellArg declaredAlgo} | awk '{print $1}' | sed 's/(.*//')
+          want=${lib.escapeShellArg declaredPrimaryAlgo}
           if [ -n "$active" ] && [ "$active" != "$want" ]; then
             echo "nixram-zram-drift: ALGORITHM MISMATCH -- declared primary '$want', live '$active'" >&2
             drift=1
@@ -154,7 +187,14 @@ in
 
           case ${lib.escapeShellArg declaredAlgo} in
             *' '*)
-              recomp=$(cat "$dev/recomp_algorithm" 2>/dev/null || echo "")
+              # First line only, via `read` rather than `$(cat ...)`: the kernel pads this
+              # attribute with trailing NUL bytes, and command substitution strips them with a
+              # "ignored null byte in input" warning on every single run -- noise in the journal
+              # of a unit whose output is supposed to mean something.
+              recomp=""
+              if [ -r "$dev/recomp_algorithm" ]; then
+                read -r recomp < "$dev/recomp_algorithm" || :
+              fi
               if [ -z "$recomp" ]; then
                 echo "nixram-zram-drift: RECOMPRESSION NOT CONFIGURED" >&2
                 echo "  declared '${declaredAlgo}' asks for a secondary pass; recomp_algorithm is empty." >&2

@@ -103,6 +103,15 @@ let
     nixram.zram.compressionAlgorithmOverride = "lzo-rle";
   };
 
+  # For the zram-drift checks below. `mode` is pinned explicitly rather than left to the level's
+  # default so the drift unit is guaranteed to exist -- a level whose default moved away from
+  # "zram" would otherwise turn these checks into an eval error about a missing attribute rather
+  # than the failure they are written to report.
+  cfg-drift = evalFor {
+    nixram.level = "64G";
+    nixram.mode = "zram";
+  };
+
   # zswap's own overrides (acceptThresholdPercent/shrinkerEnabled/diskMedium)
   # and oomd's (units/minFreeKbytesOverride/pressureDiagnostics) -- none of
   # these were ever set away from their defaults by any check.
@@ -786,6 +795,42 @@ let
     (check "oomd-disabled/root-slice-not-armed"
       (cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig == { })
       "got: ${builtins.toJSON cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig}")
+
+    # --- zram-drift: the checker's own dependencies (2026-07-29) ------------
+    # The drift unit declares no `path`, so it gets systemd's default: coreutils, findutils,
+    # gnugrep, gnused, systemd, util-linux -- and NOT gawk. A version of this script parsed
+    # mm_stat and the declared algorithm with `awk`; on a real host both calls died with
+    # "awk: command not found", the parsed values came back empty, and the unit reported
+    # RESIDENT LIMIT NOT APPLIED and ALGORITHM MISMATCH against a device that matched the
+    # declaration to the byte.
+    #
+    # This is the failure mode a checker must never have: unable to run, yet indistinguishable
+    # from having run and found drift. The remedy it prints is `swapoff` on a live swap device,
+    # so a false positive costs an operator a memory-pressure incident. Hence a test on the
+    # rendered text, not just on behaviour.
+    #
+    # A blunt substring test on purpose: it cannot tell a call from a comment, so the rendered
+    # script may not so much as MENTION the tool. That is the useful strictness here -- the
+    # alternative is a pattern that tries to recognise invocations and quietly stops matching the
+    # day someone writes `| awk ...` in a shape it did not anticipate. The history belongs in the
+    # Nix-level comments (which do not render into the script), not in the script's own text.
+    (check "zram-drift/script-calls-no-awk"
+      (!(lib.hasInfix "awk" cfg-drift.systemd.services.nixram-zram-drift.script))
+      "the rendered drift script still references awk, which is absent from the unit's PATH")
+
+    # The declared primary algorithm is a build-time constant. It belongs in the script already
+    # resolved -- recomputing it at runtime is what put a text-processing tool on this path.
+    (check "zram-drift/primary-algorithm-resolved-at-eval"
+      (lib.hasInfix
+        "want=${lib.escapeShellArg (lib.head (lib.splitString "(" (lib.head (lib.splitString " " cfg-drift.services.zram-generator.settings.zram0.compression-algorithm))))}"
+        cfg-drift.systemd.services.nixram-zram-drift.script)
+      "declared: ${builtins.toJSON cfg-drift.services.zram-generator.settings.zram0.compression-algorithm}")
+
+    # `$(cat ...)` on recomp_algorithm warns "ignored null byte in input" every run: the kernel
+    # NUL-pads the attribute. Reading the first line with a builtin is silent.
+    (check "zram-drift/recomp-algorithm-read-without-command-substitution"
+      (!(lib.hasInfix "recomp=$(cat" cfg-drift.systemd.services.nixram-zram-drift.script))
+      "recomp_algorithm is still read via command substitution, which warns on the kernel's NUL padding")
   ]
   ++ levelMatrixChecks;
 
