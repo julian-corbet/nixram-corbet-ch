@@ -450,6 +450,35 @@ let
       (lib.hasInfix "CONFIG_ZSWAP=n" cfg-4G.systemd.services."nixram-zswap-disable".script)
       "script: ${cfg-4G.systemd.services."nixram-zswap-disable".script}")
 
+    # ORDERING-CYCLE GUARD (2026-07-29 incident). Ordering this unit before
+    # systemd-zram-setup@zram0.service places it in the EARLY BOOT chain, but a
+    # service's default dependencies also add an implicit After=basic.target --
+    # and basic.target comes after sysinit.target, which that same chain feeds.
+    # The result is a cycle, and systemd resolves cycles by DELETING a job of its
+    # choosing. On a fleet host it deleted suid-sgid-wrappers.service: /run/wrappers
+    # was never populated, PAM's unix_chkpwd helper did not exist, and every
+    # authentication path failed at once -- ssh AND console. The machine booted
+    # fine and served k3s and NFS while being impossible to log into, and nothing
+    # in the failure named nixram. Never let this default come back.
+    (check "mode-zram/runtime-disable-breaks-default-deps"
+      ((cfg-4G.systemd.services."nixram-zswap-disable".unitConfig.DefaultDependencies or true) == false)
+      "unitConfig: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".unitConfig or {})}")
+
+    # DefaultDependencies=false also drops the implicit shutdown ordering, which
+    # must then be supplied by hand or the unit is not stopped cleanly.
+    (check "mode-zram/runtime-disable-keeps-shutdown-ordering"
+      (lib.elem "shutdown.target" (cfg-4G.systemd.services."nixram-zswap-disable".before or [ ])
+        && lib.elem "shutdown.target" (cfg-4G.systemd.services."nixram-zswap-disable".conflicts or [ ]))
+      "before: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".before or [ ])} conflicts: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".conflicts or [ ])}")
+
+    # The unit must still be pulled in by a normal target so it ALSO runs at
+    # `switch` time on an already-booted host -- the gap it exists to close.
+    # Fixing the cycle by making it wantedBy the zram-setup unit instead would
+    # fix boot and silently lose that.
+    (check "mode-zram/runtime-disable-still-runs-at-switch"
+      (lib.elem "multi-user.target" (cfg-4G.systemd.services."nixram-zswap-disable".wantedBy or [ ]))
+      "wantedBy: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".wantedBy or [ ])}")
+
     # mode="none" must NOT touch zswap either way -- it means "no swap-medium
     # opinion", and two real fleet hosts run mode="none" precisely to adopt
     # only the oomd layer. Silently disabling their zswap would be a

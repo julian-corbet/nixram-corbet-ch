@@ -234,7 +234,41 @@ in
     systemd.services.nixram-zswap-disable = {
       description = "Disable zswap (nixram mode=\"zram\" -- the two are mutually exclusive)";
       wantedBy = [ "multi-user.target" ];
-      before = [ "systemd-zram-setup@zram0.service" ];
+      before = [ "systemd-zram-setup@zram0.service" "shutdown.target" ];
+      conflicts = [ "shutdown.target" ];
+      # DefaultDependencies=false IS LOAD-BEARING, and its absence is not a style
+      # nit -- it cost a fleet host every login path at once (2026-07-29).
+      #
+      # `before = systemd-zram-setup@zram0.service` puts this unit inside the EARLY
+      # BOOT chain: that generator-made unit runs before dev-zram0.swap, which
+      # swap.target needs, which /run mounts and sysinit.target order against. But
+      # systemd's default dependencies for a service also add an implicit
+      # `After=basic.target` -- and basic.target comes AFTER sysinit.target. So the
+      # unit ends up required to run both before and after sysinit, i.e.:
+      #
+      #   sysinit.target -> suid-sgid-wrappers.service -> run-wrappers.mount
+      #     -> swap.target -> dev-zram0.swap -> systemd-zram-setup@zram0.service
+      #     -> nixram-zswap-disable.service -> basic.target -> sysinit.target
+      #
+      # systemd breaks such a cycle by DELETING one job, and it is under no
+      # obligation to pick ours. On the host that hit this it deleted
+      # suid-sgid-wrappers.service, so /run/wrappers was never populated, PAM's
+      # unix_chkpwd helper did not exist, and EVERY authentication path failed --
+      # ssh and console alike ("helper binary execve failed", "Access denied for
+      # user root by PAM account configuration"). The box booted, served k3s and
+      # NFS, and could not be logged into. Nothing in the log named nixram.
+      #
+      # Turning default dependencies off drops the implicit basic.target ordering
+      # and leaves only the one edge that is actually wanted (before zram setup).
+      # The explicit shutdown.target pair is what DefaultDependencies would
+      # otherwise have supplied and must be restored by hand, or the unit is not
+      # stopped cleanly on shutdown.
+      #
+      # wantedBy stays multi-user.target on purpose: this unit must ALSO run at
+      # `switch` time on an already-booted host, which is the gap the whole
+      # service exists to close (see the comment above). Making it wantedBy the
+      # zram-setup unit instead would fix boot and silently reintroduce that gap.
+      unitConfig.DefaultDependencies = false;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
