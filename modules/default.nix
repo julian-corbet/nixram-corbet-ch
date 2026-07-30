@@ -82,6 +82,64 @@ in
       '';
     };
 
+    # ── hardware.totalMiB: a FACT, not a policy input ───────────────────
+    #
+    # Everything above and below this option is POLICY: `level` is a
+    # discrete bucket the operator chooses, and every zram/zswap/oomd/
+    # sysctl value in levels.nix is keyed off that choice, never off a
+    # literal RAM number. Before this option existed, nixram had NO
+    # eval-time notion of a host's actual installed RAM at all -- the one
+    # thing that looks like one, `levels.<name>.ramMiB` in levels.nix, is
+    # bucket METADATA: the upper boundary flake.nix's `detect-level` app
+    # prints as a rounded-UP anchor, consumed by nothing in modules/*.nix
+    # (grep it -- the only reader is the boundary table generator in
+    # flake.nix). So there is nothing to reconcile here, only a genuinely
+    # new fact to add: this option, and this option alone, is nixram's
+    # answer to "how much RAM does this box actually have", kept
+    # deliberately separate from `level` so that answer can never quietly
+    # become a tuning input by accident. If a future change ever makes
+    # modules/*.nix read `cfg.hardware.totalMiB` to compute a policy
+    # value, that is the moment this option has stopped being a fact and
+    # this comment must be rewritten to say so.
+    #
+    # Unit is MiB, not GiB/bytes/the `levelNames` GiB-ish label strings:
+    # this matches every other RAM quantity zram-generator itself works
+    # in (its own `ram` variable and every `*Expr` string in levels.nix
+    # are MiB), and it matches the one place outside this repo that is
+    # expected to mirror this fact -- a namespace-root host module reading
+    # it as `config.nixram.hardware.totalMiB or null` needs the exact same
+    # unit its own RAM-ceiling field already uses, or every read site
+    # would need a silent, easy-to-forget conversion.
+    #
+    # `null` default, deliberately NOT required: nixram's own tuning is
+    # driven entirely by `level`, a manually-pasted bucket (see that
+    # option's own "detect once, paste once" description above) -- a host
+    # that only wants zram/oomd/sysctl policy from nixram has no reason to
+    # ALSO state its exact installed RAM, and forcing it to would just be
+    # a second manual fact to keep in sync with `level` for no benefit
+    # nixram itself needs. Optionality here is what lets a defensive
+    # mirror elsewhere resolve to `null` cleanly on a host that never sets
+    # this -- whether THAT read site is allowed to tolerate `null` or must
+    # assert it resolved is entirely that read site's own call, not
+    # something this option can or should decide on its behalf.
+    hardware.totalMiB = mkOption {
+      type = types.nullOr types.ints.positive;
+      default = null;
+      example = 8192;
+      description = ''
+        RAM actually installed on this host, in MiB -- a FACT, recorded
+        here only so it exists at exactly one address for anything that
+        needs to read it (this module's own cross-check below, or a
+        namespace-root host module mirroring it elsewhere). It is NOT
+        consulted by any zram/zswap/oomd/sysctl tuning in this project:
+        every one of those derives from `nixram.level`, the operator's
+        own bucket choice, never from this number. `null` (the default)
+        is correct for a host that has picked a `level` and wants nothing
+        more from nixram -- there is no assertion anywhere in this module
+        that requires this to be set.
+      '';
+    };
+
     mode = mkOption {
       type = types.enum [ "zram" "zswap" "none" ];
       default = "zram";
@@ -541,7 +599,49 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
+  config = mkIf cfg.enable (let
+    # ── hardware.totalMiB cross-check ─────────────────────────────────
+    #
+    # `zram.diskSizeOverride`/`zram.residentLimitOverride` are, in the
+    # common case, zram-generator EXPRESSION strings evaluated against
+    # its own runtime `ram` variable at boot ("ram * 75 / 100",
+    # "min(ram/2,8192)") -- opaque to Nix, and there is no sound way to
+    # eval-time-check an expression Nix cannot itself evaluate. But
+    # zram-generator's syntax also accepts a BARE integer as a literal
+    # absolute MiB size, with no `ram` term anywhere in it -- and that
+    # one shape IS checkable: an absolute ceiling above what is
+    # physically installed can never be reached, on any kernel, ever.
+    # That is not a tuning trade-off this project should stay quiet
+    # about, it is the same class of "real, catchable bug" the arch/
+    # microarch and reserved-name assertions elsewhere in this file
+    # exist for -- so it earns an assertion, gated (like all of them)
+    # on the fact actually being known: `hardware.totalMiB` is
+    # optional (see its own description above), and an override cannot
+    # be checked against a total nobody stated.
+    #
+    # Deliberately NOT extended to a `level` vs. `hardware.totalMiB`
+    # bucket-consistency check (i.e. "does the chosen level match the
+    # anchor `detect-level` would have picked for this total"): the
+    # override options above exist precisely so an operator can steer
+    # away from a level's own computed formula on purpose, and a host
+    # that states its real RAM for record-keeping while intentionally
+    # running a smaller level's tighter budget (a deliberate safety
+    # margin, not a mistake) is a legitimate configuration this module
+    # has no business failing. Physical impossibility is checkable and
+    # sound; "did you mean a different level" is a question only the
+    # operator can answer.
+    literalOverrideMiB = str:
+      if str != null && builtins.match "[0-9]+" str != null
+      then lib.toInt str
+      else null;
+
+    oversizedZramOverrides = filter
+      (o: o.miB != null && cfg.hardware.totalMiB != null && o.miB > cfg.hardware.totalMiB)
+      [
+        { option = "zram.diskSizeOverride"; miB = literalOverrideMiB cfg.zram.diskSizeOverride; }
+        { option = "zram.residentLimitOverride"; miB = literalOverrideMiB cfg.zram.residentLimitOverride; }
+      ];
+  in {
     assertions = [
       {
         assertion = cfg.level != null;
@@ -639,6 +739,25 @@ in
           with no error.
         '';
       }
-    ];
-  };
+    ] ++ map
+      (o: {
+        assertion = false;
+        message = ''
+          nixram.${o.option} is set to the literal absolute value
+          "${toString o.miB}" (MiB) -- ${toString o.miB} MiB exceeds
+          nixram.hardware.totalMiB (${toString cfg.hardware.totalMiB}
+          MiB), the RAM actually installed on this host. An absolute
+          zram-generator size above physically installed RAM can never
+          be reached regardless of compression ratio, so this is a
+          fixed value, not a formula -- almost certainly a typo'd digit
+          or a value copy-pasted from a differently-sized host. Lower
+          the override, correct `hardware.totalMiB` if THAT is what's
+          actually wrong, or express the override as a zram-generator
+          formula against its own `ram` variable (e.g. "ram * 75 / 100")
+          instead of a bare number if an absolute-vs-percentage mix was
+          never the intent.
+        '';
+      })
+      oversizedZramOverrides;
+  });
 }

@@ -20,7 +20,7 @@
 #     system-manager never touches the bootloader; kernel command-line
 #     parameters (zswap.enabled, zswap.max_pool_percent, etc.) are the host's
 #     own responsibility, set once, same "detect once, paste once" spirit as
-#     `nixram.level` itself. See `zswapBootParamsCheck.nix` -- rather than
+#     `nixram.level` itself. See `zswap-boot-params-check.nix` -- rather than
 #     silently assume they're already correct, activation actively verifies
 #     them against `/sys/module/zswap/parameters/*` and fails with the exact
 #     values to set if they don't match.
