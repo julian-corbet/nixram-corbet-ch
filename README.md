@@ -97,6 +97,13 @@ There's no default level and no eval-time auto-detection by design — see
   for the blind-spot reasoning.
 - `sysctls.enable` — escape hatch to disable the whole sysctl layer (default
   true).
+- `leanActivation.units` — service names shed just before a REAL nix closure
+  swap and restarted `settleSeconds` later via a detached transient timer, so
+  a resident tenant can't contend with the survival core for RAM during the
+  activation restart itself. Skipped silently per-unit if not loaded on this
+  box. Empty by default (opt-in; independent of `level`/`mode`).
+- `leanActivation.settleSeconds` — delay before the detached restart (default
+  60).
 - `minFreeKbytesOverride` — escape hatch only; no level sets this by default
   (see [docs/rationale.md \[6\]](docs/rationale.md#6-vmmin_free_kbytes-untouched)).
 

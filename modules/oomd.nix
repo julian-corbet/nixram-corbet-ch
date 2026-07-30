@@ -106,12 +106,17 @@ let
         // optionalAttrs (spec.memoryMax != null) { MemoryMax = mkDefault spec.memoryMax; }
         // optionalAttrs (spec.oomScoreAdjust != null) { OOMScoreAdjust = mkDefault spec.oomScoreAdjust; }
         // optionalAttrs (spec.managedOOMPreference != null) { ManagedOOMPreference = mkDefault spec.managedOOMPreference; }
-        // optionalAttrs (spec.restartSec != null) { RestartSec = mkDefault spec.restartSec; };
+        // optionalAttrs (spec.restartSec != null) { RestartSec = mkDefault spec.restartSec; }
+        # restartSecForce last, so it wins the plain Nix `//` merge on the
+        # rare/defensive case both fields are set on the same unit -- see
+        # its own option doc for why it exists (an upstream module that
+        # sets RestartSec as a plain value, beating restartSec's mkDefault).
+        // optionalAttrs (spec.restartSecForce != null) { RestartSec = mkForce spec.restartSecForce; };
     in
     {
       name = removeSuffix ".service" name;
       value = { inherit serviceConfig; }
-      // optionalAttrs (spec.restartSec != null) {
+      // optionalAttrs (spec.restartSec != null || spec.restartSecForce != null) {
         unitConfig = {
           StartLimitBurst = mkDefault 20;
           StartLimitIntervalSec = mkDefault "5min";

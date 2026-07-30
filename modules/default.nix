@@ -46,6 +46,7 @@ in
     ./zswap.nix
     ./oomd.nix
     ./sysctls.nix
+    ./lean-activation.nix
   ];
 
   options.nixram = {
@@ -140,6 +141,140 @@ in
       '';
     };
 
+    # ── levelBudgetMaxPercent: a plausibility lint on the level/total pair ──
+    #
+    # POLICY, unlike `hardware.totalMiB` above, which is a fact. The pair
+    # only becomes checkable together, and only against a bound the
+    # operator states.
+    #
+    # SCOPED DELIBERATELY NARROW, and named for what it does rather than
+    # for the concept it resembles. This is a plausibility lint on ONE
+    # declaration pair, caught at evaluation time: does the level this host
+    # picked make sense for the RAM this host says it has. It is NOT the
+    # general oversubscription-and-load-shedding concern, which is
+    # cross-cutting and does not belong to nixram at all -- every resource
+    # on a host is oversubscribed (a 16-core box runs hundreds of runnable
+    # threads; several apps share one GPU), and what actually generalises
+    # is not a ratio but the SHED ORDER: who gives way when a resource runs
+    # short. That ordering has to be one ordering per host spanning every
+    # resource, because a desktop that outranks a batch tenant for VRAM has
+    # to outrank it for RAM too or the two shed in opposite directions.
+    #
+    # The ratio also means different things per resource and is not
+    # comparable across them: over-committing CPU or IO degrades smoothly
+    # and the ratio is routinely 30:1 and uninteresting, while RAM and VRAM
+    # have a cliff (an OOM kill; an allocation failure with no swap behind
+    # it) and their tolerable ratios are small and load-dependent. cgroup
+    # v2 splits on exactly that line -- weights for the elastic resources,
+    # min/low/max protection for the cliff ones -- and this option should
+    # not pretend to speak for both.
+    #
+    # WHY THERE IS NO DEFAULT, and why this is not simply arithmetic:
+    # committing more memory than is installed is what zram is FOR. It
+    # compresses, so a level whose zram sizing and pressure ladders sit
+    # above physical RAM is a normal, deliberate configuration -- not a
+    # mistake to be caught. An earlier attempt at this check compared the
+    # level's anchor against `totalMiB` directly and refused anything
+    # above it, which rejected the most ordinary host there is: real
+    # installed RAM always reports below the round number (firmware and
+    # integrated-GPU reservations), so an 8 GiB machine reports ~8100 MiB
+    # and `level = "8G"` on it is correct.
+    #
+    # The next attempt inferred a bound from the level table itself
+    # ("rounding up to the nearest anchor is fine, skipping anchors is
+    # not"). That at least stopped rejecting sane hosts, but it was this
+    # module inventing a memory policy out of the shape of its own
+    # catalogue -- the ratio a host can tolerate depends on how
+    # compressible its workload is and how much stall its operator will
+    # accept, neither of which is anywhere in this repo.
+    #
+    # So the limit is declared, not derived. `null` -- the default --
+    # checks nothing, which is the honest behaviour for a bound nobody has
+    # stated: this module will not guess a memory policy on an operator's
+    # behalf. A host that wants the guard states a number.
+    #
+    # RECOMMENDED STARTING POINTS, not defaults: ~100 (the level may
+    # budget up to 2x installed RAM) is generous and still catches the
+    # copy-pasted-from-a-bigger-machine case, which is the failure this
+    # exists for -- a 128G level on a 4 GiB box is 3100% over. Tighter
+    # than ~25 starts refusing ordinary round-up-to-the-anchor choices on
+    # hosts whose reported total sits well below the anchor.
+    hardware.levelBudgetMaxPercent = mkOption {
+      type = types.nullOr types.ints.positive;
+      default = null;
+      example = 200;
+      description = ''
+        How far above `hardware.totalMiB` the chosen `level`'s budgets may
+        go, as a percentage of that total. `100` permits a level budgeting
+        up to twice the installed RAM; `0` permits none.
+
+        `null`, the default, disables the check. Oversubscribing memory is
+        legitimate -- zram compresses, so committing more than is
+        installed is the point -- and how far is too far depends on the
+        workload's compressibility and the operator's tolerance for
+        stalls, so this module states no opinion until one is declared.
+
+        WHY OVERSUBSCRIBING IS SOUND, not merely tolerated: the budgets a
+        level implies are a ceiling on VIRTUAL commitment, and virtual
+        commitment legitimately exceeds resident memory twice over. zram
+        compresses what it holds, so pages committed are not pages
+        occupied; and not every allocation a workload claims is ever
+        actually touched, so claims outrun residency on their own. A
+        128 GiB host set to `100` permits budgets up to 256 GiB on the
+        expectation that compression and unclaimed reservations absorb the
+        difference well before anything approaches the real total.
+
+        Only ever constrains the OVER direction. A level smaller than the
+        installed total is a deliberate safety margin (see
+        `hardware.totalMiB`'s own description) and is never checked
+        against this.
+
+        Requires `hardware.totalMiB` to be set to have any effect --
+        a ratio against an unstated total is not checkable.
+      '';
+    };
+
+    # ── swappinessHint: an escape valve for the mode="none" blind spot ──
+    #
+    # modules/sysctls.nix deliberately renders NO swap-behaviour sysctl at
+    # all under `mode = "none"` (see that file's own header comment and
+    # checks/default.nix's `mode-none/no-swappiness` test) -- a documented,
+    # TESTED contract this option does not change or bypass. That contract
+    # is correct for a host with genuinely no swap medium at all. But
+    # `mode = "none"` is ALSO the right choice for a host whose swap
+    # device IS real and RAM-backed (zram) but created by a DIFFERENT
+    # mechanism than this project's own zram-generator wiring (e.g.
+    # nixpkgs' own legacy `zramSwap` module) -- and such a host still
+    # wants this project's own swappiness research, it just cannot get it
+    # rendered by `modules/sysctls.nix` under that mode.
+    #
+    # This option hands the NUMBER to an external caller so it can render
+    # its own `boot.kernel.sysctl."vm.swappiness"` assignment through
+    # whichever layer actually owns that host's config -- it is read-only
+    # (nixram computes it from `level`, never accepts it as input) so the
+    # single source of truth stays `levels.nix`, not a second copy.
+    swappinessHint = mkOption {
+      type = types.nullOr (types.ints.between 0 200);
+      # Deliberately NOT `readOnly = true`: that flag requires the option
+      # to carry EXACTLY one definition anywhere it is forced, and a
+      # `default` counts as one -- so a real value from `config` below
+      # PLUS this option's own `null` default (needed so a disabled/
+      # level-less nixram doesn't hard-eval-error) would itself trip
+      # "read-only, but it's set multiple times" (found the hard way:
+      # this exact combination broke `nix flake check`). Computed, not
+      # meant to be set by a host -- enforced by convention/description,
+      # like `hardware.totalMiB` above, not by the type system.
+      default = null;
+      description = ''
+        Read-only: the active level's own `vm.swappiness` value (see
+        `levels.nix`), exposed regardless of `mode` -- for a caller that
+        cannot go through this module's own sysctls.nix rendering because
+        it runs `mode = "none"` for a swap device that is real but
+        managed elsewhere. `null` unless nixram is enabled with a real
+        level.
+      '';
+    };
+
     mode = mkOption {
       type = types.enum [ "zram" "zswap" "none" ];
       default = "zram";
@@ -231,6 +366,43 @@ in
         default instead). Use this only for a genuinely unusual box the
         level-based policy doesn't fit -- state the outcome you want
         directly, same as every other zram override.
+      '';
+    };
+
+    # ── zram.legacyPercent: the mode="none" blind spot, applied to sizing ──
+    #
+    # Same "none" ambiguity `swappinessHint` above addresses, for zram
+    # SIZE rather than swappiness: a host on `mode = "none"` because its
+    # real zram swap device is created by nixpkgs' own LEGACY `zramSwap`
+    # module (memoryPercent-based), not this project's own zram-generator
+    # wiring. Read-only, computed from `level` -- see the lookup table's
+    # own comment in this file's `config` block for why it is a small
+    # separate table rather than a `levels.nix` field, and for exactly
+    # which levels currently have a value.
+    #
+    # Deliberately NOT derived from `zram.diskSizeExpr`/`residentLimitExpr`:
+    # the legacy module has no resident-limit concept at all (it only
+    # ever sets one size), so the "generous virtual ceiling vs. tight
+    # physical budget" split those two formulas encode under this
+    # project's own "both" sizing model has no equivalent single
+    # percentage to translate into.
+    zram.legacyPercent = mkOption {
+      type = types.nullOr (types.ints.between 1 100);
+      # See swappinessHint's own comment above for why this is
+      # deliberately NOT `readOnly = true` (that flag conflicts with
+      # also carrying a `default`, which this option needs so a
+      # disabled/level-less nixram doesn't hard-eval-error).
+      default = null;
+      description = ''
+        Read-only: the RAM percentage a host on `mode = "none"` should
+        pass to nixpkgs' own legacy `zramSwap.memoryPercent` option, for
+        a host whose real zram swap device is created by that older
+        module instead of this project's own zram-generator wiring.
+        Where a value exists, it is a figure tuned on a real host,
+        carried here so an external caller reads it from one place
+        instead of a second, independently-drifting copy. `null` at
+        every level this project has never been asked to supply this
+        number for.
       '';
     };
 
@@ -432,7 +604,32 @@ in
               OOM kill self-heals instead of latching the unit "failed".
               Off (null) by default -- most units don't need this; it
               exists for data services worth restarting fast after a
-              memory-pressure kill.
+              memory-pressure kill. Rendered via `mkDefault`; if the
+              unit's own upstream module sets `serviceConfig.RestartSec`
+              as a plain (non-mkDefault) value, that plain value silently
+              wins with no error -- use `restartSecForce` below instead
+              in that situation.
+            '';
+          };
+          restartSecForce = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = ''
+              Same as `restartSec`, but rendered via `mkForce` instead of
+              `mkDefault`. Exists because some nixpkgs service modules
+              set their OWN `serviceConfig.RestartSec` as a plain
+              (non-mkDefault) value -- e.g. `services.pocket-id`'s own
+              module hardcodes `RestartSec = 1` directly -- which
+              silently beats `restartSec`'s `mkDefault` rendering with no
+              error and no warning (confirmed empirically against that
+              module). Use this ONLY for a unit verified to need it:
+              `restartSec` remains the right choice everywhere else,
+              since a value set via `mkForce` can no longer be overridden
+              again by a host that legitimately wants something else.
+              Carries the same StartLimitBurst/IntervalSec pairing as
+              `restartSec` (still via `mkDefault` -- no upstream module
+              observed so far has contested those two fields, only
+              RestartSec itself).
             '';
           };
         };
@@ -641,6 +838,32 @@ in
         { option = "zram.diskSizeOverride"; miB = literalOverrideMiB cfg.zram.diskSizeOverride; }
         { option = "zram.residentLimitOverride"; miB = literalOverrideMiB cfg.zram.residentLimitOverride; }
       ];
+
+    # ── zram.legacyPercent's lookup ─────────────────────────────────────
+    #
+    # Deliberately NOT part of levels.nix's own 14-tier schema: that file
+    # is this project's core memory-tuning table (every tunable there
+    # tagged sourced/directed/extrapolated/default against this project's
+    # own zram-generator + oomd + sysctl mechanism). This lookup is
+    # narrower compatibility glue for one specific situation -- a host
+    # still on nixpkgs' own legacy `zramSwap` module for its actual swap
+    # device -- and adding a mostly-null field to all fourteen tiers for
+    # that would blur the two concerns. Absent (not `null`-at-every-tier
+    # padding) is the honest shape here: only the levels this project has
+    # actually been asked to supply a number for appear at all.
+    legacyZramPercentByLevel = {
+      "512M" = 40;
+      # Carried over from "1G" below rather than measured at this size:
+      # both are the same class of box (a sub-gigabyte VPS on the legacy
+      # module), so the number is inherited, not independently validated.
+      # Stated plainly because an inherited figure and a measured one
+      # deserve different amounts of trust.
+      "1G" = 40;
+      # Measured, not inferred: at 25% the pool reached 81% occupancy
+      # within 40 minutes of a fresh boot, leaving no headroom before a
+      # reclaim livelock resumed. 40% holds on the same workload. This is
+      # the one number here with an incident behind it.
+    };
   in {
     assertions = [
       {
@@ -758,6 +981,54 @@ in
           never the intent.
         '';
       })
-      oversizedZramOverrides;
+      oversizedZramOverrides
+    ++ lib.optional
+      (cfg.level != null
+        && cfg.hardware.totalMiB != null
+        && cfg.hardware.levelBudgetMaxPercent != null
+        && levelsData.levels.${cfg.level}.ramMiB
+          > cfg.hardware.totalMiB * cfg.hardware.levelBudgetMaxPercent / 100)
+      {
+        assertion = false;
+        message = ''
+          nixram.level = "${cfg.level}" budgets for
+          ${toString levelsData.levels.${cfg.level}.ramMiB} MiB, which is
+          more than ${toString cfg.hardware.levelBudgetMaxPercent}% of the
+          ${toString cfg.hardware.totalMiB} MiB this host actually has
+          (nixram.hardware.levelBudgetMaxPercent allows up to
+          ${toString (cfg.hardware.totalMiB * cfg.hardware.levelBudgetMaxPercent / 100)} MiB).
+
+          Oversubscribing memory is not an error here and this assertion is
+          not trying to prevent it -- zram exists precisely to commit more
+          than is installed, because it compresses, so a level whose budgets
+          sit above physical RAM is a legitimate and often intended
+          configuration. What is not knowable by this module is HOW FAR is
+          too far: that depends on the workload's compressibility and on how
+          much of a stall the operator will accept, so the bound is theirs to
+          state and this only enforces the bound they stated.
+
+          Either raise `hardware.levelBudgetMaxPercent` if this ratio really
+          is intended on this host, drop it to `null` to stop checking
+          entirely, or fix whichever of `level` / `hardware.totalMiB` is
+          wrong about the hardware. A level far above the real total is most
+          often a host declaration copy-pasted from a bigger machine, where
+          `hardware.totalMiB` was corrected for the new box and `level` was
+          not.
+
+          Note this never fires in the other direction: a host recording its
+          real RAM while running a smaller level's tighter budget is a
+          deliberate safety margin, documented as legitimate, and is not
+          oversubscription at all.
+        '';
+      };
+
+    # Read-only "hint" surface -- see each option's own doc comment above
+    # for why these exist (the mode="none" blind spot: a swap device that
+    # is real but managed by a different mechanism than this module's own
+    # rendering). Computed unconditionally from `activeLevel`/the lookup
+    # table, independent of `mode` -- a caller decides for itself whether
+    # its own situation calls for reading them.
+    nixram.swappinessHint = activeLevel.swappiness;
+    nixram.zram.legacyPercent = legacyZramPercentByLevel.${activeLevelName} or null;
   });
 }

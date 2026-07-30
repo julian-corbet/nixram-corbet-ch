@@ -49,6 +49,7 @@ let
 
   cfg-4G = evalFor { nixram.level = "4G"; };
   cfg-256M = evalFor { nixram.level = "256M"; };
+  cfg-512M = evalFor { nixram.level = "512M"; };
   cfg-1G = evalFor { nixram.level = "1G"; };
   cfg-128G = evalFor { nixram.level = "128G"; };
   cfg-sizing-virtual = evalFor {
@@ -65,6 +66,17 @@ let
     swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
   };
   cfg-level-unset = evalFor { nixram.level = null; };
+  # lean-activation: default (no units stated) renders no activationScript at
+  # all -- the mechanism is opt-in, not something every nixram adopter pays for.
+  cfg-lean-default = evalFor { };
+  # One named unit, default settleSeconds (60).
+  cfg-lean-units = evalFor { nixram.leanActivation.units = [ "podman-bulwark" ]; };
+  # Two named units + a non-default settleSeconds, proving both are threaded
+  # through independently (not one hardcoded against the other).
+  cfg-lean-settle = evalFor {
+    nixram.leanActivation.units = [ "a" "b" ];
+    nixram.leanActivation.settleSeconds = 30;
+  };
   cfg-mode-none = evalFor {
     nixram.level = "64G";
     nixram.mode = "none";
@@ -179,6 +191,20 @@ let
     };
   };
 
+  # restartSecForce's whole reason to exist: a plain (non-mkDefault)
+  # RestartSec from SOME OTHER module (standing in for a real one like
+  # services.pocket-id's own hardcoded RestartSec = 1) must lose to it,
+  # exactly the fight restartSec's own mkDefault rendering always loses.
+  cfg-override-oomd-restart-force = evalFor {
+    nixram.level = "4G";
+    nixram.oomd.units."nixram-test-force.service" = {
+      restartSecForce = "2s";
+    };
+    # Stands in for an upstream module's own plain assignment -- same
+    # priority class as a real service module's hardcoded RestartSec.
+    systemd.services."nixram-test-force".serviceConfig.RestartSec = "1";
+  };
+
   # --- level-matrix ---------------------------------------------------------
   # Every one of the 14 levels, evaluated once (mode = zram, the default)
   # and cross-checked against levels.nix's own raw table. Closes a real gap
@@ -237,6 +263,10 @@ let
         (check "level-matrix/${name}/oomd-enable"
           (cfg.systemd.oomd.enable == lvl.oomd.enable)
           "got: ${builtins.toJSON cfg.systemd.oomd.enable}, expected: ${builtins.toJSON lvl.oomd.enable}")
+
+        (check "level-matrix/${name}/swappiness-hint"
+          (cfg.nixram.swappinessHint == lvl.swappiness)
+          "got: ${builtins.toJSON cfg.nixram.swappinessHint}, expected: ${builtins.toJSON lvl.swappiness}")
 
         (check "level-matrix/${name}/recompress-timer-presence"
           ((cfg.systemd.timers ? "nixram-zram-recompress") == lvl.zram.recompressionTimerEnableByDefault)
@@ -403,6 +433,31 @@ let
     (check "level-1G/recompress-timer-absent"
       (!(cfg-1G.systemd.timers ? "nixram-zram-recompress"))
       "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-1G.systemd.timers)}")
+
+    # --- legacy-zram-percent-hint ---------------------------------------------
+    # nixram.zram.legacyPercent's own lookup: currently defined only for the two
+    # two levels a real host has actually been run at (both are mode="none"
+    # hosts still on nixpkgs' legacy zramSwap module), absent
+    # (null) everywhere else -- ship absence over a guessed number.
+    (check "legacy-zram-percent-hint/1G"
+      (cfg-1G.nixram.zram.legacyPercent == 40)
+      "got: ${builtins.toJSON cfg-1G.nixram.zram.legacyPercent}")
+
+    (check "legacy-zram-percent-hint/512M"
+      (cfg-512M.nixram.zram.legacyPercent == 40)
+      "got: ${builtins.toJSON cfg-512M.nixram.zram.legacyPercent}")
+
+    (check "legacy-zram-percent-hint/absent-at-4G"
+      (cfg-4G.nixram.zram.legacyPercent == null)
+      "got: ${builtins.toJSON cfg-4G.nixram.zram.legacyPercent}")
+
+    # --- swappiness-hint-under-mode-none ---------------------------------
+    # The whole reason swappinessHint/zram.legacyPercent exist: mode="none"
+    # renders NO swappiness sysctl at all (mode-none/no-swappiness below),
+    # but the hint must still carry the real number through unaffected.
+    (check "swappiness-hint-under-mode-none/hint-still-present"
+      (cfg-mode-none.nixram.swappinessHint == levelsData.levels."64G".swappiness)
+      "got: ${builtins.toJSON cfg-mode-none.nixram.swappinessHint}")
 
     # --- level-128G-resident-limit -------------------------------------------
     (check "level-128G-resident-limit/resident-limit-attr"
@@ -731,6 +786,15 @@ let
       (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitIntervalSec == "5min")
       "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".unitConfig.StartLimitIntervalSec or null)}")
 
+    # --- oomd-ladder/restart-sec-force ------------------------------------
+    (check "oomd-ladder/restart-sec-force-wins-over-a-plain-competing-value"
+      (cfg-override-oomd-restart-force.systemd.services."nixram-test-force".serviceConfig.RestartSec == "2s")
+      "got: ${builtins.toJSON (cfg-override-oomd-restart-force.systemd.services."nixram-test-force".serviceConfig.RestartSec or null)} -- restartSecForce must beat a plain-priority competing RestartSec, exactly the fight restartSec's own mkDefault always loses")
+
+    (check "oomd-ladder/restart-sec-force-still-pairs-start-limit-burst"
+      (cfg-override-oomd-restart-force.systemd.services."nixram-test-force".unitConfig.StartLimitBurst == 20)
+      "got: ${builtins.toJSON (cfg-override-oomd-restart-force.systemd.services."nixram-test-force".unitConfig.StartLimitBurst or null)}")
+
     (check "oomd-ladder/sacrificial-slice-memory-max"
       (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryMax == "320M")
       "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.slices."nixram-test-sacrifice".sliceConfig.MemoryMax or null)}")
@@ -831,6 +895,39 @@ let
     (check "zram-drift/recomp-algorithm-read-without-command-substitution"
       (!(lib.hasInfix "recomp=$(cat" cfg-drift.systemd.services.nixram-zram-drift.script))
       "recomp_algorithm is still read via command substitution, which warns on the kernel's NUL padding")
+
+    # ── lean-activation: activation-time tenant shedding, independent of level/mode ──────────
+    (check "lean-activation/default-renders-no-script"
+      (!(cfg-lean-default.system.activationScripts ? nixramLeanActivation))
+      "nixram.leanActivation.units defaults to [ ], which must render NO activationScripts entry at all -- an unconditional no-op mechanism is not opt-in")
+
+    (check "lean-activation/units-rendered-in-loop"
+      (lib.hasInfix "for tenant in podman-bulwark.service; do"
+        cfg-lean-units.system.activationScripts.nixramLeanActivation.text)
+      "the stated unit (with .service appended) is missing from the rendered shed loop")
+
+    (check "lean-activation/existence-guard-present"
+      (lib.hasInfix ''systemctl cat "$tenant"''
+        cfg-lean-units.system.activationScripts.nixramLeanActivation.text)
+      "the rendered script is missing the per-tenant existence guard -- a host that shares this list without carrying every named unit would fail a detached restart of a unit that was never loaded")
+
+    (check "lean-activation/real-swap-only-guard-present"
+      (lib.hasInfix "/run/current-system" cfg-lean-units.system.activationScripts.nixramLeanActivation.text
+        && lib.hasInfix "/nix/var/nix/profiles/system" cfg-lean-units.system.activationScripts.nixramLeanActivation.text)
+      "the rendered script is missing the real-closure-swap guard -- without it a plain reload/boot would bounce the shed units")
+
+    (check "lean-activation/default-settle-seconds-60"
+      (lib.hasInfix "--on-active=60s" cfg-lean-units.system.activationScripts.nixramLeanActivation.text)
+      "settleSeconds defaults to 60 but the rendered restart timer does not say --on-active=60s")
+
+    (check "lean-activation/settle-seconds-overridable"
+      (lib.hasInfix "--on-active=30s" cfg-lean-settle.system.activationScripts.nixramLeanActivation.text
+        && !(lib.hasInfix "--on-active=60s" cfg-lean-settle.system.activationScripts.nixramLeanActivation.text))
+      "settleSeconds = 30 must fully replace the default 60s timer, not add alongside it")
+
+    (check "lean-activation/multiple-units-independent"
+      (lib.hasInfix "for tenant in a.service b.service; do" cfg-lean-settle.system.activationScripts.nixramLeanActivation.text)
+      "both stated units (a, b) must appear in the rendered loop, in the stated order")
   ]
   ++ levelMatrixChecks;
 
