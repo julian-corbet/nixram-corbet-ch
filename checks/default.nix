@@ -76,7 +76,7 @@ let
   # Proves the mkDefault fix on "-.slice"/"user.slice" actually works: a
   # host can override just ONE slice with a plain assignment (no
   # lib.mkForce) while the other keeps nixram's own default -- exactly the
-  # pattern a real fleet host (e2-micro) needs to preserve its own
+  # pattern a real host (e2-micro) needs to preserve its own
   # incident-tuned oomd config (root slice at a custom percentage, user
   # slice deliberately left unarmed) on top of nixram.
   cfg-override-user-slice = evalFor {
@@ -464,7 +464,7 @@ let
     # service's default dependencies also add an implicit After=basic.target --
     # and basic.target comes after sysinit.target, which that same chain feeds.
     # The result is a cycle, and systemd resolves cycles by DELETING a job of its
-    # choosing. On a fleet host it deleted suid-sgid-wrappers.service: /run/wrappers
+    # choosing. On a real host it deleted suid-sgid-wrappers.service: /run/wrappers
     # was never populated, PAM's unix_chkpwd helper did not exist, and every
     # authentication path failed at once -- ssh AND console. The machine booted
     # fine and served k3s and NFS while being impossible to log into, and nothing
@@ -489,7 +489,7 @@ let
       "wantedBy: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".wantedBy or [ ])}")
 
     # mode="none" must NOT touch zswap either way -- it means "no swap-medium
-    # opinion", and two real fleet hosts run mode="none" precisely to adopt
+    # opinion", and two real hosts run mode="none" precisely to adopt
     # only the oomd layer. Silently disabling their zswap would be a
     # surprise change well outside what they opted into.
     (check "mode-none/does-not-touch-zswap"

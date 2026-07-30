@@ -112,7 +112,7 @@ let
   zswapOvercommitMemory = 1;
 
   # own-measured, real production evidence -- verified live via SSH against
-  # three actual fleet boxes running zram (none of them nixram itself, all
+  # three actual boxes running zram (none of them nixram itself, all
   # three via an entirely separate hand-rolled zram-generator config), then
   # cross-checked against their own source repos, not just the live sysctl
   # dump alone (a first pass mischaracterized this exact value as "stale
@@ -146,7 +146,7 @@ let
   # design ethos -- while dire tiers, with almost no slack to begin with,
   # plausibly benefit more from the kernel's own upfront heuristic
   # rejection than from a permissive stance banking entirely on reactive
-  # machinery. Reasoned, not proven by the fleet sample it happened to be
+  # machinery. Reasoned, not proven by the host sample it happened to be
   # checked against -- scoped to reluctant tiers only, tagged extrapolated
   # rather than directed for exactly that reason.
   zramReluctantOvercommitMemory = 1;
@@ -159,7 +159,7 @@ in
 {
   config = mkIf (cfg.enable && cfg.sysctls.enable) {
     # See sysctls.reapplyBridge.enable's own description for the systemd-sysctl regression this
-    # guards against and why both ExecStarts are `-` prefixed. Migrated here from a fleet host
+    # guards against and why both ExecStarts are `-` prefixed. Migrated here from a host
     # that hit the bug: a workaround one machine carries privately is a workaround every machine
     # running this module is one systemd bump away from needing.
     systemd.services.nixram-sysctl-reapply = mkIf cfg.sysctls.reapplyBridge.enable {

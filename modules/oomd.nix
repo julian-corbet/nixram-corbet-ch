@@ -70,7 +70,7 @@ let
   # shared default) system-wide, specifically to react faster under a
   # bursty compute (LLM-load) workload -- this is the one place nixram's
   # "zram/zswap share the number" stance (rationale.md [10]) turned out
-  # not to hold up against the real fleet data point it's supposed to be
+  # not to hold up against the real host data point it's supposed to be
   # grounded in. The limit percentage (60%) is unchanged; only the
   # duration was shortened. Flagged as possibly workload-specific rather
   # than a general zswap-laptop fact (the real config ties it to a
@@ -191,7 +191,7 @@ in
     # modules/sysctls.nix already keeps. Before this, a host's own plain
     # `systemd.slices."user".sliceConfig = {};` would have collided with
     # this module's own definition instead of winning -- found adversarially
-    # while working out how a real fleet host (e2-micro) could preserve its
+    # while working out how a real host (e2-micro) could preserve its
     # own incident-tuned oomd config (root slice at 80%, user slice
     # deliberately left unarmed) on top of nixram.
     # `//`-merged with the sacrificial slices for the same reason as

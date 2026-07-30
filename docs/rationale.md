@@ -159,7 +159,7 @@ box with disksize shrunk to a small fixed cap (an old, since-replaced
 formula — [1]) and no resident limit behind it, there was nothing bounding
 how much of that pool could actually fill with compressed data at once
 beyond disksize itself — the exact combination that produced this project's
-own fleet's 20% (25 GiB) real-world zram99 sizing on a 125 GiB box that hit
+own 20% (25 GiB) real-world zram99 sizing on a 125 GiB box that hit
 swap-slot exhaustion under a transient compression-ratio collapse (see
 `experiments/README.md` for the prior open-question framing this
 replaces).
@@ -228,7 +228,7 @@ reference laptop's real production config (see the zswap-profile note
 below). 120 (the eager tiers' final value) is also directed — the
 operator's own explicit revision. The reluctant tiers' resting value,
 10, is likewise directed — the operator's own real historical data
-point (the fleet's previous long-running NAS-class server), given
+point (their previous long-running NAS-class server), given
 directly when questioning whether 60 was still too high. The tier split
 itself (dire tiers eager, reluctant tiers low-at-rest) generalizes the
 operator's qualitative direction ("swappiness should be low, and super
@@ -304,7 +304,7 @@ directly questioned it: "60 is still very high. A long-running NAS-class
 server had 10, the reference laptop has 25." 60 was never chosen *for*
 this tier group — it's simply the kernel's own plain, untuned default,
 inherited by not picking anything else. It was never checked against
-this project's own real, historical fleet data until asked directly.
+this project's own real, historical host data until asked directly.
 Once it was: 10 (a real prior production value, not a guess) and 25 (a
 different real production value, on a different medium/mode) both sit
 well below 60. The reluctant tiers now rest at **10**, with a PSI-gated
@@ -332,7 +332,7 @@ default to reason about workload shape it cannot see.
 **zswap (25, down from 120):** a cache miss here is a REAL disk read —
 worse than the reluctant zram case's worst case — so it should be more
 reluctant still, not less. This is no longer a reasoned midpoint: it's
-sourced from this project's own fleet. The reference laptop runs zswap in
+sourced from the operator's own hosts. The reference laptop runs zswap in
 production and independently converged on 25 for exactly this reason (a
 mixed LLM+browser workload that needs anonymous memory to stay resident,
 not get evicted to a disk-backed cache). Nothing in the adversarial review
@@ -342,7 +342,7 @@ this whole note.
 **Source:** kernel vm sysctl docs (swappiness 0-200 range, IO-cost
 rationale, `get_scan_count()`'s list-size-weighted scan targets); Pop!_OS
 default-settings (PR #163 lineage) for the original 180 anchor, now revised
-down; this project's own fleet (the previous long-running NAS-class
+down; the operator's own hosts (the previous long-running NAS-class
 server's real, historical 10; the reference laptop's real,
 production-tuned 25 for zswap) for the two directed resting values; the
 operator's own direct revision for the final 120 value. The tier split,
@@ -663,7 +663,7 @@ for half a minute) on a 256M box and a 128G box. This is why nixram ships
 the same flat value at every level rather than tapering it: there is no
 mechanism-level reason to taper a scale-invariant ratio. Prior art agrees:
 systemd-oomd and Meta's own oomd (the C++ project it's a from-scratch
-reimplementation of the ideas from) both ship one flat number fleet-wide,
+reimplementation of the ideas from) both ship one flat number everywhere,
 with zero size-tiering guidance in either project's documentation.
 
 One correction this surfaced: NixOS's own `systemd.oomd` module
@@ -709,7 +709,7 @@ episode can be told apart as CPU-bound or disk-bound after the fact. See
 This paragraph is about the 60% *limit* specifically, which zram and zswap
 still do share unmodified. The *duration* half of the pair no longer is:
 `mode = "zswap"` cuts it to 3s (above), a directed correction made once the
-real fleet data point behind it was actually checked, not a further
+real host data point behind it was actually checked, not a further
 consequence of the severity argument here.
 
 ## [11] Idle recompression: zstd(level=3), gated on genuine idleness
@@ -994,7 +994,7 @@ elevated, then lowers it back to 10 once the pressure has actually
 resolved.
 
 **Honesty:** directed for both the direction and the anchor values — 10
-is the operator's own real historical data point (the fleet's previous
+is the operator's own real historical data point (their previous
 long-running NAS-class server ran swappiness=10), given directly when
 questioning whether 60 was still too high. The relief mechanism's
 existence and its purpose ("swap is for overflow when upgrades run or
@@ -1162,7 +1162,7 @@ any upstream precedent or further word from the operator.
 100); reluctant tiers (2G-128G) leave it untouched.
 
 **Honesty:** own-measured, real production evidence — stronger than a first
-pass gave it credit for. Verified live (SSH) against three real fleet boxes
+pass gave it credit for. Verified live (SSH) against three real boxes
 running zram, none of them nixram itself (all three via a separate,
 hand-rolled `zram-generator.conf`): a real 128G-class server, e2-micro
 (1G), vultr (512M). e2-micro runs `vfs_cache_pressure=200` in
@@ -1212,7 +1212,7 @@ was deliberately reasoning about zram-tier overcommit policy. Neither
 e2-micro nor vultr set this sysctl deliberately either (both are
 just the plain kernel default). So the real evidence here is much thinner
 than the vfs_cache_pressure case above — directionally suggestive, not
-confirmed by the fleet sample it happened to be checked against.
+confirmed by the host sample it happened to be checked against.
 
 **Reasoning, on its own mechanistic merits (independent of how any real box
 actually got its current value):** `overcommit_memory=1` disables the
@@ -1278,7 +1278,7 @@ box this project has, tuned for a bursty compute (LLM-load) workload where
 waiting a full 30 seconds to confirm pressure is real costs more than it
 protects against. This is the one place nixram's "zram and zswap share the
 same PSI threshold" stance ([10]) turned out not to hold up against the
-real fleet data point it's supposed to be grounded in: 30s was carried over
+real host data point it's supposed to be grounded in: 30s was carried over
 by default, never independently checked against the reference laptop's
 actual production config until asked directly. Flagged as possibly
 workload-specific rather than a general zswap-laptop fact — the real
@@ -1347,7 +1347,7 @@ the reference laptop").
 An earlier version of this profile used 120 — a reasoned midpoint between
 the plain-disk kernel default (60) and zram's eager tiers' value at the
 time (130) — but that was never verified against any real deployment. 25
-replaced it: this project's real, sourced fleet data point. The reference
+replaced it: this project's real, sourced data point. The reference
 laptop runs zswap in production under a mixed LLM+browser workload that needs
 anon memory to stay resident rather than get pushed to a disk-backed
 cache, and independently converged on 25 for exactly that reason.

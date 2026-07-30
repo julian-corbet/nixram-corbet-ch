@@ -237,7 +237,7 @@ in
       before = [ "systemd-zram-setup@zram0.service" "shutdown.target" ];
       conflicts = [ "shutdown.target" ];
       # DefaultDependencies=false IS LOAD-BEARING, and its absence is not a style
-      # nit -- it cost a fleet host every login path at once (2026-07-29).
+      # nit -- it cost a host every login path at once (2026-07-29).
       #
       # `before = systemd-zram-setup@zram0.service` puts this unit inside the EARLY
       # BOOT chain: that generator-made unit runs before dev-zram0.swap, which

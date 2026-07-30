@@ -439,7 +439,7 @@ in
         warning, sysctls simply not applied. Fixed in 261, but the failure mode is the dangerous
         kind -- a box reports a clean activation and runs kernel defaults, and nothing surfaces
         the difference until something else goes wrong. Migrated into this module from a real
-        fleet host that hit it and carried a hand-written workaround since.
+        host that hit it and carried a hand-written workaround since.
 
         Two details are load-bearing, both learned the hard way:
 
