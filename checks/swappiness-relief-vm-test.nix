@@ -110,10 +110,10 @@ let
 
     # PURE SAFETY NET, not the primary detection path -- deliberately set
     # HIGH, well above the pressure a normal run of this workload produces
-    # (observed peaks: 10.32-12.15). Earlier, lower values were tried and
-    # ruled out: freezing (SIGSTOP) only ever HALTS the workers' ongoing
-    # contention, after which avg10 purely decays from wherever it was
-    # paused -- it does not hold pressure steady. A trigger set anywhere
+    # (observed peaks: 10.32-12.15). A lower value does not work: freezing
+    # (SIGSTOP) only ever HALTS the workers' ongoing contention, after
+    # which avg10 purely decays from wherever it was paused -- it does not
+    # hold pressure steady. A trigger set anywhere
     # near or below the real entry threshold therefore guarantees the
     # relief valve never sees a sustained crossing at all; it just
     # truncates the climb early. This value exists only to stop something
@@ -262,11 +262,11 @@ pkgs.testers.nixosTest {
             )
             active_unit = unit
             try:
-                # Per-attempt budget, not the old single-shot 120s: a real
-                # climb-to-threshold has taken ~25-30s in every observed
-                # run, and a hard OOM resolves (as a unit failure, not a
-                # hang) within a few seconds -- 45s comfortably covers a
-                # genuine success without wasting time on a doomed attempt.
+                # Per-attempt budget: a real climb-to-threshold has taken
+                # ~25-30s in every observed run, and a hard OOM resolves (as
+                # a unit failure, not a hang) within a few seconds -- 45s
+                # comfortably covers a genuine success without wasting time
+                # on a doomed attempt.
                 machine.wait_until_succeeds(
                     "test $(cat /proc/sys/vm/swappiness) -eq 60", timeout=45
                 )

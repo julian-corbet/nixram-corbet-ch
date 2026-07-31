@@ -206,16 +206,13 @@ let
   };
 
   # --- level-matrix ---------------------------------------------------------
-  # Every one of the 14 levels, evaluated once (mode = zram, the default)
-  # and cross-checked against levels.nix's own raw table. Closes a real gap
-  # found by review 2026-07-24: only 8/14 levels were ever touched by any
-  # eval-test in any mode/backend (a copy-paste slip in the other 6 -- 512M,
-  # 6G, 8G, 10G, 12G, 32G -- could have shipped silently), only 3/14 had
-  # systemd.oomd.enable asserted at all, and the 24G residentLimitExpr/
-  # diskSizeExpr 25%->20% step (flagged in levels.nix's own comment as
-  # "unconfirmed") had zero coverage under this backend. This is the ONE
-  # place that gives every level, including any added later, coverage by
-  # construction rather than by remembering to add another cfg-<level>.
+  # Every one of the 14 levels, evaluated once (mode = zram, the default) and cross-checked
+  # against levels.nix's own raw table -- a copy-paste slip in any one tier (a wrong compression
+  # algorithm, an unasserted systemd.oomd.enable, the 24G residentLimitExpr/diskSizeExpr
+  # 25%->20% step levels.nix itself flags "unconfirmed") could otherwise ship silently in
+  # whichever tier nobody happened to write a dedicated fixture for. This is the ONE place that
+  # gives every level, including any added later, coverage by construction rather than by
+  # remembering to add another cfg-<level>.
   cfg-by-level = builtins.listToAttrs (map
     (name: { inherit name; value = evalFor { nixram.level = name; }; })
     levelsData.levelNames);
@@ -626,7 +623,7 @@ let
       (evalFailsBuild { nixram.level = null; })
       "expected forcing system.build.toplevel to fail for level=null, but it succeeded")
 
-    # --- new-assertions (2026-07-24 review) --------------------------------
+    # --- assertions: cross-field consistency ---------------------------------
     (check "recompression-timer-requires-algorithm/eval-fails"
       (evalFailsBuild {
         nixram.level = "256M";
@@ -643,10 +640,10 @@ let
       })
       "expected forcing system.build.toplevel to fail (zram override set while mode=zswap) but it succeeded")
 
-    # --- reserved-name collisions (2026-07-25 adversarial review) ----------
-    # Before the assertions this proves, each of these silently discarded
-    # the operator's whole config via a plain `//` merge in modules/oomd.nix
-    # -- no error at all. Now a hard eval-time failure instead.
+    # --- reserved-name collisions ----------------------------------------
+    # A `sacrificialSlices` name colliding with a reserved slice name is a hard eval-time
+    # failure: a plain `//` merge in modules/oomd.nix would otherwise silently discard the
+    # operator's whole config for that slice, with no error at all.
     (check "sacrificial-slice-reserved-name-dash/eval-fails"
       (evalFailsBuild {
         nixram.level = "4G";
@@ -749,7 +746,7 @@ let
       (cfg-override-oomd.systemd.timers ? "nixram-pressure-diagnostics")
       "systemd.timers keys: ${builtins.toJSON (builtins.attrNames cfg-override-oomd.systemd.timers)}")
 
-    # --- oomd-ladder (the 2026-07-24 "subsume the whole ladder" redesign) --
+    # --- oomd-ladder (the full per-unit memory ladder + restart resilience) --
     (check "oomd-ladder/unit-memory-min"
       (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMin == "24M")
       "got: ${builtins.toJSON (cfg-override-oomd-ladder.systemd.services."nixram-test-ladder".serviceConfig.MemoryMin or null)}")
@@ -843,7 +840,7 @@ let
       (!(cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".unitConfig ? "StartLimitBurst"))
       "got: ${builtins.toJSON (cfg-override-oomd-all-null.systemd.services."nixram-test-all-null".unitConfig or null)}")
 
-    # --- oomd-disabled-with-ladder-unit (2026-07-25 review) -----------------
+    # --- oomd-disabled-with-ladder-unit --------------------------------------
     (check "oomd-disabled/ladder-fields-still-unconditional-memory-min"
       (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.MemoryMin == "24M")
       "got: ${builtins.toJSON (cfg-oomd-disabled-with-ladder-unit.systemd.services."nixram-test-disabled-ladder".serviceConfig.MemoryMin or null)}")
@@ -860,7 +857,7 @@ let
       (cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig == { })
       "got: ${builtins.toJSON cfg-oomd-disabled-with-ladder-unit.systemd.slices."-".sliceConfig}")
 
-    # --- zram-drift: the checker's own dependencies (2026-07-29) ------------
+    # --- zram-drift: the checker's own dependencies --------------------------
     # The drift unit declares no `path`, so it gets systemd's default: coreutils, findutils,
     # gnugrep, gnused, systemd, util-linux -- and NOT gawk. A version of this script parsed
     # mm_stat and the declared algorithm with `awk`; on a real host both calls died with

@@ -50,15 +50,13 @@ let
   activeLevelName = if cfg.level != null then cfg.level else builtins.head levelNames;
   activeLevel = levels.${activeLevelName};
 
-  # zswap's own flat swappiness -- directed, not extrapolated: the operator
-  # named 25 directly ("the only zswap box is the reference laptop"), reversing an
-  # earlier reasoned-midpoint value of 120. A zswap cache miss is a REAL
-  # disk read, worse than the reluctant zram tiers' worst case, so it
-  # should be more reluctant still, not less -- and it's this project's
-  # one real production data point: the the reference laptop runs zswap live and
-  # independently converged on 25 for exactly this reason (a mixed
-  # LLM+browser workload that needs anon memory to stay resident, not
-  # get pushed to a disk-backed cache). See docs/rationale.md [3].
+  # zswap's own flat swappiness -- directed, not extrapolated: the operator named 25 directly
+  # ("the only zswap box is the reference laptop"). A zswap cache miss is a REAL disk read, worse
+  # than the reluctant zram tiers' worst case, so it should be more reluctant still, not less --
+  # and it's this project's one real production data point: the reference laptop runs zswap live
+  # and independently converged on 25 for exactly this reason (a mixed LLM+browser workload that
+  # needs anon memory to stay resident, not get pushed to a disk-backed cache). See
+  # docs/rationale.md [3].
   zswapSwappiness = 25;
 
   # Disk-medium property, distinct from zram's page-cluster=0: once a
@@ -68,16 +66,10 @@ let
   # default (3, left untouched) for HDD swap.
   zswapPageCluster = if cfg.zswap.diskMedium == "ssd" then 2 else null;
 
-  # directed -- the operator: "for the the reference laptop at least adapt to what it has
-  # now." An earlier version of this profile reused the Pop!_OS-validated
-  # flat 125, reasoning the server table's RAM-size taper doesn't apply
-  # to a laptop/desktop's shorter-lived, interactive pressure pattern --
-  # a plausible argument, but it was never actually checked against this
-  # project's own real zswap box. It now is: the reference laptop runs 50 in
-  # production (halved from an earlier 100, after a real incident where
-  # 100 amplified a reclaim feedback loop under CPU contention). 50 is
-  # this project's own real, incident-tested data point; 125 was a
-  # plausible-sounding but unverified substitute. See docs/rationale.md [5].
+  # directed -- the reference laptop's real production value, adapted to what the machine
+  # actually needs rather than Pop!_OS's flat 125 (unverified against a real zswap box). 50 is
+  # incident-tested: halved from an earlier 100 after 100 amplified a reclaim feedback loop under
+  # CPU contention. See docs/rationale.md [5].
   zswapWatermarkScaleFactor = 50;
 
   # directed -- the reference laptop's real production value (kernel default is 100,
@@ -114,10 +106,10 @@ let
   # own-measured, real production evidence -- verified live via SSH against
   # three actual boxes running zram (none of them nixram itself, all
   # three via an entirely separate hand-rolled zram-generator config), then
-  # cross-checked against their own source repos, not just the live sysctl
-  # dump alone (a first pass mischaracterized this exact value as "stale
-  # leftover defaults" -- wrong; corrected after reading the actual config
-  # history). e2-micro (1G, a real "dire" tier) runs vfs_cache_pressure=200
+  # cross-checked against their own source repos rather than trusting the
+  # live sysctl dump alone: a value that looks like a stale leftover
+  # default can in fact be a deliberate, documented choice, and only the
+  # config history tells the two apart. e2-micro (1G, a real "dire" tier) runs vfs_cache_pressure=200
   # in production -- NOT inherited or accidental: it's "Step 5" of a
   # documented, red-teamed hardening bisection (infra
   # modules/nixos/profiles/base.nix), specifically chosen to evict

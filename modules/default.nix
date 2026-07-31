@@ -88,17 +88,14 @@ in
     # Everything above and below this option is POLICY: `level` is a
     # discrete bucket the operator chooses, and every zram/zswap/oomd/
     # sysctl value in levels.nix is keyed off that choice, never off a
-    # literal RAM number. Before this option existed, nixram had NO
-    # eval-time notion of a host's actual installed RAM at all -- the one
-    # thing that looks like one, `levels.<name>.ramMiB` in levels.nix, is
-    # bucket METADATA: the upper boundary flake.nix's `detect-level` app
-    # prints as a rounded-UP anchor, consumed by nothing in modules/*.nix
-    # (grep it -- the only reader is the boundary table generator in
-    # flake.nix). So there is nothing to reconcile here, only a genuinely
-    # new fact to add: this option, and this option alone, is nixram's
-    # answer to "how much RAM does this box actually have", kept
-    # deliberately separate from `level` so that answer can never quietly
-    # become a tuning input by accident. If a future change ever makes
+    # literal RAM number. The one thing that looks like an eval-time RAM
+    # fact, `levels.<name>.ramMiB` in levels.nix, is bucket METADATA: the
+    # upper boundary flake.nix's `detect-level` app prints as a rounded-UP
+    # anchor, consumed by nothing in modules/*.nix (grep it -- the only
+    # reader is the boundary table generator in flake.nix). This option,
+    # and this option alone, is nixram's answer to "how much RAM does this
+    # box actually have", kept deliberately separate from `level` so that
+    # answer can never quietly become a tuning input by accident. If a future change ever makes
     # modules/*.nix read `cfg.hardware.totalMiB` to compute a policy
     # value, that is the moment this option has stopped being a fact and
     # this comment must be rewritten to say so.
@@ -173,20 +170,16 @@ in
     # committing more memory than is installed is what zram is FOR. It
     # compresses, so a level whose zram sizing and pressure ladders sit
     # above physical RAM is a normal, deliberate configuration -- not a
-    # mistake to be caught. An earlier attempt at this check compared the
-    # level's anchor against `totalMiB` directly and refused anything
-    # above it, which rejected the most ordinary host there is: real
-    # installed RAM always reports below the round number (firmware and
-    # integrated-GPU reservations), so an 8 GiB machine reports ~8100 MiB
-    # and `level = "8G"` on it is correct.
+    # mistake to be caught.
     #
-    # The next attempt inferred a bound from the level table itself
-    # ("rounding up to the nearest anchor is fine, skipping anchors is
-    # not"). That at least stopped rejecting sane hosts, but it was this
-    # module inventing a memory policy out of the shape of its own
-    # catalogue -- the ratio a host can tolerate depends on how
-    # compressible its workload is and how much stall its operator will
-    # accept, neither of which is anywhere in this repo.
+    # A direct comparison of the level's anchor against `totalMiB` doesn't work: real installed
+    # RAM always reports below the round number (firmware and integrated-GPU reservations), so an
+    # 8 GiB machine reports ~8100 MiB and `level = "8G"` on it is correct, not over budget.
+    # Inferring a bound from the level table itself instead ("rounding up to the nearest anchor is
+    # fine, skipping anchors is not") avoids that false positive, but it is this module inventing a
+    # memory policy out of the shape of its own catalogue -- the ratio a host can tolerate depends
+    # on how compressible its workload is and how much stall its operator will accept, neither of
+    # which is anywhere in this repo.
     #
     # So the limit is declared, not derived. `null` -- the default --
     # checks nothing, which is the honest behaviour for a bound nobody has
@@ -930,7 +923,6 @@ in
         # would be silently and completely discarded by that merge (the
         # hardcoded literal on the right always wins the whole key), losing
         # its MemoryHigh/MemoryMax containment with no build error at all.
-        # Caught adversarially; see the finding this assertion closes.
         assertion = !(cfg.oomd.sacrificialSlices ? "-")
           && !(cfg.oomd.sacrificialSlices ? "-.slice")
           && !(cfg.oomd.sacrificialSlices ? "user")

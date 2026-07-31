@@ -93,21 +93,15 @@
         residentLimitExpr = "ram * 30 / 100";
         # directed -- 30% is the operator's own stated figure at this tier
         # ("Taking off 75MB for ZRAM" at 256M is ~30%; matched at 512M's
-        # "we take 30% for virtual RAM"), NOT the memory-safety headroom
-        # argument the old ram/2 (50%) value was reasoned from. Same
-        # 20-30% band as zswap.maxPoolPercent -- the two modes share this
+        # "we take 30% for virtual RAM"), not a memory-safety headroom
+        # argument. Same 20-30% band as zswap.maxPoolPercent -- the two modes share this
         # leg; only what sits behind it differs. The zram-resident-limit
         # PRIMITIVE is sourced (systemd/zram-generator upstream); this
         # fraction is the operator's own choice. See docs/rationale.md [2].
         compressionAlgorithm = "zstd(level=3)";
         # directed -- the operator's explicit instruction: "make sure that
-        # everything up to a GB goes to zstd primary and done." An
-        # earlier version of this file wrongly gave 256M/512M a
-        # lz4+recompress architecture instead, over-applying his separate,
-        # much narrower "weakest of weak" exception ("even then I am not
-        # sure") to the whole dire band -- that was a real implementation
-        # mistake, not a design choice, caught and reverted. 256M-1G share
-        # one shape: zstd(level=3) primary, no recompression at all.
+        # everything up to a GB goes to zstd primary and done." 256M-1G
+        # share one shape: zstd(level=3) primary, no recompression at all.
         # rationale.md [9].
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
@@ -118,8 +112,7 @@
       };
 
       swappiness = 120;
-      # directed -- the operator revised this down from 130 (itself already
-      # adversarially revised down from an initial 180). The EAGER value:
+      # directed -- the operator's own figure, revised down from 130. The EAGER value:
       # once file cache is genuinely near-empty (true here), the anon:file
       # scan-target math collapses toward anon regardless of the exact
       # ratio, so most of the distance up toward 200's ceiling buys almost
@@ -160,8 +153,7 @@
         compressionAlgorithm = "zstd(level=3)"; # directed, the operator: "everything up to a GB goes to zstd primary and done" -- [9]
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
-        # 256M-1G all share this shape now -- see the 256M block above for
-        # the correction history. rationale.md [9].
+        # 256M-1G all share this shape -- see the 256M block above. rationale.md [9].
         priority = 100;                              # sourced -- [12]
       };
       swappiness = 120;             # directed -- [3] (dire/eager, same as 256M)
@@ -185,21 +177,14 @@
         compressionAlgorithm = "zstd(level=3)"; # directed -- [9], the operator: "we go for zstd directly"
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
-        # zstd-primary/no-recompression -- 256M-1G all share this shape
-        # now (see 256M's block for the correction history: an earlier
-        # version wrongly split 256M/512M off onto a lz4+recompress
-        # architecture). rationale.md [9], [11].
+        # zstd-primary/no-recompression -- 256M-1G all share this shape. rationale.md [9], [11].
         priority = 100;                              # sourced -- [12]
       };
       swappiness = 120;
-      # directed -- EAGER, unified with 256M/512M (previously
-      # 10/reluctant, revised after the operator's own compute-boundedness
-      # explanation: "with 1GB RAM, you need to get whatever you can"
-      # describes urgency, not comfort -- the same "light usage,
-      # RAM-desperate" story that justifies 256M/512M's eager value applies
-      # here too, not the "enough true RAM to wait" story the reluctant
-      # value was reasoned from. Reluctant (10) now starts at 2G, not 1G.
-      # 120 is the operator's own revision down from 130. rationale.md [3].
+      # directed -- EAGER, unified with 256M/512M: "with 1GB RAM, you need to get whatever you
+      # can" describes urgency, not comfort -- the same "light usage, RAM-desperate" story that
+      # justifies 256M/512M's eager value applies here too, not the "enough true RAM to wait"
+      # story reluctant tiers (2G+) are reasoned from. rationale.md [3].
       swappinessReliefEnableByDefault = false;
       # extrapolated -- [3], no relief valve needed, dire tiers already eager
       watermarkScaleFactor = 200;   # extrapolated -- [5]
@@ -219,16 +204,11 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         # extrapolated, own-measured -- [1]. 25% resident budget x pi(),
         # rounded to the nearest 3-smooth "RAM-buyable" fraction (the operator's
-        # own formula -- collapses to a flat 0.75, see the file header). No
-        # longer Fedora's plain "ram" default -- that formula was
-        # disconnected from the actual resident budget. rationale.md [1].
+        # own formula -- collapses to a flat 0.75, see the file header). rationale.md [1].
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";
-        # extrapolated, own-measured -- [9]. Same cheap-primary +
-        # recompression shape as 256M/512M/1G used to have (that
-        # shape now belongs to 2G+ only, for a workload compute-
-        # boundedness reason rather than the small tiers' necessity --
-        # see rationale.md [9]).
+        # extrapolated, own-measured -- [9]. Cheap-primary + recompression, for a workload
+        # compute-boundedness reason (see rationale.md [9]) -- this shape belongs to 2G+ only.
         recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
@@ -443,13 +423,12 @@
         # extrapolated, own-measured -- [1]. 20% resident budget x pi(),
         # rounded to the nearest 3-smooth "RAM-buyable" fraction (0.75 --
         # same fraction as 24G/32G/128G, since the ratio is fixed within
-        # this tier group). Replaces an earlier `min(ram/2, 16384)`
-        # formula: Pop!_OS's borrowed 16GiB cap made no sense once nixram
-        # switched to a resident-limit-first safety model. Evaluates to
-        # 48 GiB at this tier. See docs/rationale.md [1].
+        # this tier group). No fixed cap here (unlike Pop!_OS's borrowed
+        # 16GiB one): once the resident limit is the real safety backstop,
+        # capping the virtual disksize separately adds nothing. Evaluates
+        # to 48 GiB at this tier. See docs/rationale.md [1].
         residentLimitExpr = "ram * 20 / 100";
-        # extrapolated -- closes what was an open question (previously
-        # unset/unlimited here). 20% is the operator's stated figure for this
+        # extrapolated -- 20% is the operator's stated figure for this
         # tier. The "CPU-tax budget, not memory-safety backstop" framing
         # is this project's own explanation for why it applies here too --
         # 20% here is the operator's own explicit figure ("taking a 20% slice

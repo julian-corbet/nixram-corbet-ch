@@ -49,29 +49,24 @@ let
     nixram.oomd.enable = false;
   };
 
-  # Proves the missing-mkDefault regression (found by review 2026-07-24,
-  # fixed in system-manager/oomd.nix) stays fixed: a host must be able to
-  # override just ONE slice with a plain assignment, no lib.mkForce, the
-  # same escape hatch checks/default.nix's NixOS-side equivalent test
-  # (override-wins/user-slice-plain-override-no-mkforce-needed) already
-  # proves for the NixOS backend.
+  # A host must be able to override just ONE slice with a plain assignment, no lib.mkForce --
+  # the missing-mkDefault regression guard (system-manager/oomd.nix), the same escape hatch
+  # checks/default.nix's NixOS-side equivalent test
+  # (override-wins/user-slice-plain-override-no-mkforce-needed) already proves for that backend.
   cfg-override-user-slice = evalFor {
     nixram.level = "24G";
     systemd.slices."user".sliceConfig = { };
   };
 
-  # Proves the zswap-boot-params-check regression (found by review
-  # 2026-07-24: only 3 of 6 documented parameters were ever verified,
-  # fixed in system-manager/zswap-boot-params-check.nix) stays fixed.
+  # Regression guard: every one of the six documented zswap boot params must actually be
+  # verified (system-manager/zswap-boot-params-check.nix), not just a subset of them.
   cfg-override-accept-threshold = evalFor {
     nixram.level = "24G";
     nixram.zswap.acceptThresholdPercent = 70;
   };
 
-  # The full richer per-unit ladder (memory ladder + restart resilience) +
-  # sacrificial slice + swapUsedLimitPercent -- the 2026-07-24 "subsume the
-  # whole ladder" redesign, mirrored from checks/default.nix's NixOS-side
-  # cfg-override-oomd-ladder.
+  # The full per-unit ladder (memory ladder + restart resilience) + sacrificial slice +
+  # swapUsedLimitPercent, mirrored from checks/default.nix's NixOS-side cfg-override-oomd-ladder.
   cfg-override-oomd-ladder = evalFor {
     nixram.level = "24G";
     nixram.oomd.units."nixram-test-ladder.service" = {
@@ -220,11 +215,10 @@ let
       (evalFails { nixram.level = "24G"; nixram.mode = "zram"; })
       "expected evaluation to fail (mode = zram unsupported here) but it succeeded")
 
-    # --- reserved-name collisions (2026-07-25 adversarial review) ----------
-    # Mirrors checks/default.nix's NixOS-side negative tests -- before the
-    # matching assertion in system-manager/default.nix, each of these
-    # silently discarded the operator's config via a plain `//` merge in
-    # system-manager/oomd.nix, no error at all.
+    # --- reserved-name collisions --------------------------------------------
+    # Mirrors checks/default.nix's NixOS-side negative tests: without the assertion in
+    # system-manager/default.nix, a plain `//` merge in system-manager/oomd.nix would
+    # silently discard the operator's config for a reserved-name slice, with no error at all.
     (check "sm-sacrificial-slice-reserved-name-dash/eval-fails"
       (evalFails {
         nixram.level = "24G";
@@ -286,7 +280,7 @@ let
       (cfg-oomd-disabled.environment.etc ? "systemd/system/sshd.service.d/nixram-oom-protect.conf")
       "environment.etc keys: ${builtins.toJSON (builtins.attrNames cfg-oomd-disabled.environment.etc)}")
 
-    # --- override-wins (regression tests for the 2026-07-24 review fixes) --
+    # --- override-wins (per-slice/per-param override regression guards) ----
     (check "sm-override-wins/user-slice-plain-override-no-mkforce-needed"
       (cfg-override-user-slice.systemd.slices."user".sliceConfig == { })
       "got: ${builtins.toJSON cfg-override-user-slice.systemd.slices."user".sliceConfig}")
@@ -330,7 +324,7 @@ let
         cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script)
       "script: ${cfg-24G.system-manager.preActivationAssertions.nixram-zswap-active.script}")
 
-    # --- oomd-ladder (the 2026-07-24 "subsume the whole ladder" redesign) --
+    # --- oomd-ladder (the full per-unit memory ladder + restart resilience) --
     (check "sm-oomd-ladder/unit-dropin-service-section"
       (lib.hasInfix "MemoryMin=24M"
         cfg-override-oomd-ladder.environment.etc."systemd/system/nixram-test-ladder.service.d/nixram-oom-protect.conf".text
@@ -392,7 +386,7 @@ let
       (cfg-override-oomd-all-null.environment.etc."systemd/system/nixram-test-all-null.service.d/nixram-oom-protect.conf".text == "[Service]\n\n")
       "text: ${builtins.toJSON (cfg-override-oomd-all-null.environment.etc."systemd/system/nixram-test-all-null.service.d/nixram-oom-protect.conf".text or null)}")
 
-    # --- oomd-disabled-with-ladder-unit (2026-07-25 review) -----------------
+    # --- oomd-disabled-with-ladder-unit --------------------------------------
     (check "sm-oomd-disabled/ladder-fields-still-unconditional"
       (lib.hasInfix "MemoryMin=24M"
         cfg-oomd-disabled-with-ladder-unit.environment.etc."systemd/system/nixram-test-disabled-ladder.service.d/nixram-oom-protect.conf".text

@@ -193,12 +193,11 @@ in
     # the root slice at a different percentage than the level default while
     # leaving user.slice alone entirely) with a plain assignment, the same
     # "escape hatch on every layer, no mkForce needed" promise
-    # modules/sysctls.nix already keeps. Before this, a host's own plain
-    # `systemd.slices."user".sliceConfig = {};` would have collided with
-    # this module's own definition instead of winning -- found adversarially
-    # while working out how a real host (e2-micro) could preserve its
-    # own incident-tuned oomd config (root slice at 80%, user slice
-    # deliberately left unarmed) on top of nixram.
+    # modules/sysctls.nix already keeps -- e2-micro needs exactly this to
+    # preserve its own incident-tuned oomd config (root slice at 80%, user
+    # slice deliberately left unarmed) on top of nixram. Without mkDefault
+    # here, a host's own plain `systemd.slices."user".sliceConfig = {};`
+    # would collide with this module's own definition instead of winning.
     # `//`-merged with the sacrificial slices for the same reason as
     # `systemd.services` above -- one `systemd.slices` attrset, not a mix of
     # dotted-path and whole-set assignment in the same module.

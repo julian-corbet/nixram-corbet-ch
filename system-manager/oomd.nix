@@ -157,8 +157,7 @@ in
     # oomd.enable = false (the exact combination the option exists for).
     #
     # mkDefault is kept INSIDE, so a host can still override either slice with
-    # a plain assignment when oomd IS enabled -- that escape hatch was itself a
-    # 2026-07-24 review fix and must not regress.
+    # a plain assignment when oomd IS enabled -- that escape hatch must not regress.
     systemd.slices = listToAttrs (mapAttrsToList sacrificialSliceEntry cfg.oomd.sacrificialSlices)
       // optionalAttrs cfg.oomd.enable {
         "-".sliceConfig = mkDefault pressureSliceConfig;
