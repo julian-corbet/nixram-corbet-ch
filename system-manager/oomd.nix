@@ -52,6 +52,30 @@ let
       "${toString (if cfg.mode == "zswap" then zswapOomdPressureDurationSec else cfg.oomd.pressureDurationSec)}s";
   };
 
+  # Same defense as modules/oomd.nix's own `sliceCollapseWarning` -- see that file's comment for
+  # the mechanism. Ported rather than shared: this backend's `"-".sliceConfig = mkDefault
+  # pressureSliceConfig;` (below) is the identical shape, so it is exposed to the identical bug --
+  # a NESTED field assignment (`systemd.slices."-".sliceConfig.MemoryMin = "...";`, from a host or
+  # a third module) sits at normal priority and silently discards this whole attrset, not just the
+  # field it touched, and that is indistinguishable from the DELIBERATE `sliceConfig = { };`
+  # wholesale-disarm case this file's own comment, just below, exists to keep working.
+  sliceCollapseWarning = name:
+    let effective = config.systemd.slices.${name}.sliceConfig or { };
+    in optional
+      (effective != { }
+        && effective != pressureSliceConfig
+        && all (k: builtins.hasAttr k pressureSliceConfig) (builtins.attrNames effective))
+      ''
+        nixram: systemd.slices."${name}".sliceConfig is missing ${
+          concatStringsSep ", "
+            (subtractLists (builtins.attrNames effective) (builtins.attrNames pressureSliceConfig))
+        } of the PSI fields nixram's oomd layer would otherwise arm there. If sliceConfig was set
+        to `{ }` deliberately to disarm this slice, or to a fully custom set on purpose, this is
+        expected -- ignore it. If it was set by naming ONE nested field directly instead of the
+        whole attrset, that partial definition sits at normal priority and silently discarded
+        nixram's whole contribution to this slice, not just the field it touched.
+      '';
+
   # Same `oomd.units` model as modules/oomd.nix, rendered differently:
   # system-manager cannot merge into a FOREIGN unit's native option tree
   # (sshd.service is pacman-owned here, not declared by this config at
@@ -163,6 +187,10 @@ in
         "-".sliceConfig = mkDefault pressureSliceConfig;
         "user".sliceConfig = mkDefault pressureSliceConfig;
       };
+
+    # See `sliceCollapseWarning`'s own comment, above.
+    warnings = optionals cfg.oomd.enable
+      (sliceCollapseWarning "-" ++ sliceCollapseWarning "user");
 
     systemd.services.nixram-pressure-diagnostics = mkIf cfg.oomd.pressureDiagnostics.enable {
       description = "nixram PSI pressure diagnostic snapshot (memory + io, for zswap severity correlation)";

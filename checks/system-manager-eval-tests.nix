@@ -58,6 +58,14 @@ let
     systemd.slices."user".sliceConfig = { };
   };
 
+  # This backend's equivalent of checks/default.nix's `cfg-nested-slice-field-collapse` -- see
+  # that fixture's own comment for the mechanism (system-manager/oomd.nix's `"-".sliceConfig =
+  # mkDefault pressureSliceConfig;` is the identical shape, so it is exposed to the identical bug).
+  cfg-nested-slice-field-collapse = evalFor {
+    nixram.level = "24G";
+    systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit = "80%";
+  };
+
   # Regression guard: every one of the six documented zswap boot params must actually be
   # verified (system-manager/zswap-boot-params-check.nix), not just a subset of them.
   cfg-override-accept-threshold = evalFor {
@@ -288,6 +296,22 @@ let
     (check "sm-override-wins/root-slice-keeps-nixram-default-when-only-user-overridden"
       (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
       "got: ${builtins.toJSON (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
+
+    (check "sm-override-wins/wholesale-disarm-raises-no-collapse-warning"
+      (cfg-override-user-slice.warnings == [ ])
+      "got: ${builtins.toJSON cfg-override-user-slice.warnings}")
+
+    (check "sm-nested-slice-field-collapse/other-psi-fields-silently-dropped"
+      (cfg-nested-slice-field-collapse.systemd.slices."-".sliceConfig
+        == { ManagedOOMMemoryPressureLimit = "80%"; })
+      "got: ${builtins.toJSON cfg-nested-slice-field-collapse.systemd.slices."-".sliceConfig}")
+
+    (check "sm-nested-slice-field-collapse/is-no-longer-silent"
+      (let w = cfg-nested-slice-field-collapse.warnings;
+       in builtins.length w == 1
+         && lib.hasInfix "ManagedOOMMemoryPressure" (builtins.head w)
+         && lib.hasInfix "ManagedOOMMemoryPressureDurationSec" (builtins.head w))
+      "got: ${builtins.toJSON cfg-nested-slice-field-collapse.warnings}")
 
     (check "sm-override-wins/accept-threshold-percent-in-preactivation-script"
       (lib.hasInfix "check_param accept_threshold_percent 70"

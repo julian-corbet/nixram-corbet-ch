@@ -96,6 +96,16 @@ let
     systemd.slices."user".sliceConfig = { };
   };
 
+  # THE BUG `sliceCollapseWarning` DEFENDS AGAINST: a NESTED field of "-".sliceConfig set
+  # directly, rather than the whole attrset -- silently discards nixram's other two PSI fields at
+  # normal priority, the same mechanism that collapsed nixaudio.fabric.peers in production. `cfg`
+  # itself is UNCHANGED (fixing that would break `cfg-override-user-slice`'s own wholesale-disarm
+  # case, above), so this fixture proves the module now NAMES the gap in `warnings` instead.
+  cfg-nested-slice-field-collapse = evalFor {
+    nixram.level = "4G";
+    systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit = "80%";
+  };
+
   # The remaining zram escape hatches -- diskSizeOverride is covered by
   # cfg-override above, these four were never exercised by any check.
   cfg-override-resident-limit = evalFor {
@@ -705,6 +715,22 @@ let
     (check "override-wins/root-slice-keeps-nixram-default-when-only-user-overridden"
       (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit == "60%")
       "got: ${builtins.toJSON (cfg-override-user-slice.systemd.slices."-".sliceConfig.ManagedOOMMemoryPressureLimit or null)}")
+
+    (check "override-wins/wholesale-disarm-raises-no-collapse-warning"
+      (cfg-override-user-slice.warnings == [ ])
+      "got: ${builtins.toJSON cfg-override-user-slice.warnings}")
+
+    (check "nested-slice-field-collapse/other-psi-fields-silently-dropped"
+      (cfg-nested-slice-field-collapse.systemd.slices."-".sliceConfig
+        == { ManagedOOMMemoryPressureLimit = "80%"; })
+      "got: ${builtins.toJSON cfg-nested-slice-field-collapse.systemd.slices."-".sliceConfig}")
+
+    (check "nested-slice-field-collapse/is-no-longer-silent"
+      (let w = cfg-nested-slice-field-collapse.warnings;
+       in builtins.length w == 1
+         && lib.hasInfix "ManagedOOMMemoryPressure" (builtins.head w)
+         && lib.hasInfix "ManagedOOMMemoryPressureDurationSec" (builtins.head w))
+      "got: ${builtins.toJSON cfg-nested-slice-field-collapse.warnings}")
 
     (check "override-wins/resident-limit-override"
       (cfg-override-resident-limit.services.zram-generator.settings.zram0."zram-resident-limit" == "ram / 8")

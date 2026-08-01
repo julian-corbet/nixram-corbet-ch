@@ -84,6 +84,34 @@ let
       "${toString (if cfg.mode == "zswap" then zswapOomdPressureDurationSec else activeLevel.oomd.pressureDurationSec)}s";
   };
 
+  # Same general defense as nixaudio.fabric.peers / nixarch.deviceGids -- see either's own
+  # comment for the mechanism (the class this repo was swept for). `"-".sliceConfig = mkIf
+  # cfg.oomd.enable (mkDefault pressureSliceConfig);`, below, is ONE definition of the whole
+  # three-field attrset -- so a consumer naming a NESTED field of it directly
+  # (`systemd.slices."-".sliceConfig.MemoryMin = "...";`, say -- not this module's own concern,
+  # since it never does that itself, but nothing stops a THIRD module or a host from doing it) sits
+  # at normal priority and discards `pressureSliceConfig` in its entirety, not just the field it
+  # touched. That is indistinguishable, from `config` alone, from the DELIBERATE, tested
+  # `systemd.slices."user".sliceConfig = { };` wholesale-disarm case just below (which this module
+  # exists to keep working, see its comment) -- so this can only ever be a warning, matching
+  # nixaudio's own "cheap to read past when deliberate, valuable the one time it wasn't" choice.
+  sliceCollapseWarning = name:
+    let effective = config.systemd.slices.${name}.sliceConfig or { };
+    in optional
+      (effective != { }
+        && effective != pressureSliceConfig
+        && all (k: builtins.hasAttr k pressureSliceConfig) (builtins.attrNames effective))
+      ''
+        nixram: systemd.slices."${name}".sliceConfig is missing ${
+          concatStringsSep ", "
+            (subtractLists (builtins.attrNames effective) (builtins.attrNames pressureSliceConfig))
+        } of the PSI fields nixram's oomd layer would otherwise arm there. If sliceConfig was set
+        to `{ }` deliberately to disarm this slice, or to a fully custom set on purpose, this is
+        expected -- ignore it. If it was set by naming ONE nested field directly instead of the
+        whole attrset, that partial definition sits at normal priority and silently discarded
+        nixram's whole contribution to this slice, not just the field it touched.
+      '';
+
   # One entry per `oomd.units` unit, merging whichever fields are set:
   # the MemoryMin/Low/High/Max resource ladder AND the OOMScoreAdjust
   # (kernel-fallback layer -- this is what still protects the unit even
@@ -211,6 +239,14 @@ in
       "system".sliceConfig =
         mkIf (cfg.oomd.enable && cfg.oomd.monitorSystemSlice) (mkDefault pressureSliceConfig);
     };
+
+    # See `sliceCollapseWarning`'s own comment, above -- fires once per slice this module actually
+    # arms, matching the same `enable`/`monitorSystemSlice` gates the slices themselves use just
+    # above (a slice this module never arms has nothing here for a nested override to collapse).
+    warnings = optionals cfg.oomd.enable
+      (sliceCollapseWarning "-"
+        ++ sliceCollapseWarning "user"
+        ++ optionals cfg.oomd.monitorSystemSlice (sliceCollapseWarning "system"));
 
     # SwapUsedLimit: OFF unless a host opts in -- see the option's own doc
     # comment (modules/default.nix) and docs/faq.md for the blind-spot
