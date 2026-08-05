@@ -1,9 +1,11 @@
 # nixram
 
-A small NixOS flake module that tunes memory-pressure handling — zram or
-zswap, systemd-oomd, and the `vm.*` sysctl layer — from a single declared RAM
-level, instead of a dozen loosely-related knobs you have to hand-pick and
-hope agree with each other.
+A small flake module family for coherent host-memory policy. Its NixOS and
+system-manager modules tune memory-pressure handling — zram or zswap,
+systemd-oomd, and the `vm.*` sysctl layer — from a single declared RAM level,
+instead of a dozen loosely-related knobs you have to hand-pick and hope agree
+with each other. Its Home Manager module covers the user-session policies
+that a system module cannot render safely.
 
 The thesis in three sentences: zram's `disksize` is only a cheap, virtual
 ceiling, and the real physical cost is bounded separately by
@@ -107,6 +109,64 @@ There's no default level and no eval-time auto-detection by design — see
 - `minFreeKbytesOverride` — escape hatch only; no level sets this by default
   (see [docs/rationale.md \[6\]](docs/rationale.md#6-vmmin_free_kbytes-untouched)).
 
+## User-session working sets
+
+NixRAM also exports `homeManagerModules.nixram`. This is deliberately a
+separate plane: browser profiles, user configuration files, and user systemd
+units belong to the logged-in account, while a system-manager configuration
+has no `systemd.user.services` surface.
+
+The optional Profile Sync Daemon (PSD) policy keeps selected browser profiles
+in RAM and synchronizes them back to storage. It requires an explicit browser
+list, so a host never accidentally lets PSD adopt every supported browser it
+finds. The Home Manager module uses the nixpkgs package by default; a host
+whose distro package manager owns PSD supplies that binary through
+`nixram.profileSync.command` instead.
+
+The optional `dmemcg-booster` policy is narrower. It is for a foreground game
+or desktop session on a kernel that exposes the device-memory cgroup
+controller. It is not a replacement for general GPU sharing or a container
+resource manager. The system-manager service refuses activation unless its
+current cgroup root exposes `/sys/fs/cgroup/dmem.capacity`, because the
+upstream daemon needs that value to calculate `dmem.low` limits. A container
+may expose usage and maximum files without exposing that capacity, in which
+case the daemon cannot enforce its policy.
+
+For a system-manager host, the package backend remains the host's own
+reconciler. NixRAM only publishes the required package names:
+
+```nix
+# system-manager configuration
+imports = [ inputs.nixram.systemManagerModules.nixram ];
+
+nixram = {
+  profileSync.package.enable = true;
+  dmemcg = {
+    package.enable = true;
+    booster.state = "disabled";
+  };
+};
+
+# The hub's Arch backend performs the actual reconciliation.
+nixarch.packages.pacman = config.nixram.archPackages;
+```
+
+```nix
+# Home Manager configuration for a distro-managed PSD package.
+imports = [ inputs.nixram.homeManagerModules.nixram ];
+
+nixram.profileSync = {
+  service.enable = true;
+  command = "/usr/bin/profile-sync-daemon";
+  browsers = [ "firefox" ];
+};
+```
+
+An enabled dmem booster additionally requires its command to be supplied by
+the host package backend on both planes. `state = "disabled"` is useful when
+a vendor unit was enabled manually: NixRAM masks the system unit and makes a
+stale user-unit enablement inert without imperatively mutating the session.
+
 ## Non-NixOS hosts (CachyOS / Arch, via system-manager)
 
 `nixosModules.nixram` needs a real NixOS host. For a non-NixOS Linux box
@@ -177,8 +237,9 @@ sourced/extrapolated/kernel-default badges on every value.
   [docs/faq.md](docs/faq.md)).
 - No universal `min_free_kbytes` formula (none exists in any source this
   project reviewed).
-- Not a container/cgroup memory manager — this is host-level `vm.*` and
-  swap-medium tuning only.
+- No general container or cgroup resource manager. The base policy remains
+  host-level `vm.*` and swap-medium tuning; the optional dmem booster is a
+  foreground user-session policy with a strict runtime capability check.
 
 ## Status
 

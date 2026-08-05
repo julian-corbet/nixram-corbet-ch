@@ -7,7 +7,7 @@
 # inspects what the module RENDERS into `config`. These check the
 # module's output values, never runtime behavior on a booted machine.
 
-{ pkgs, nixpkgs, nixramModule, systemManagerModule, systemManagerLib }:
+{ pkgs, nixpkgs, nixramModule, systemManagerModule, systemManagerLib, homeModule }:
 
 let
   lib = pkgs.lib;
@@ -990,5 +990,9 @@ else {
   # `lib.makeSystemConfig`. See system-manager/default.nix.
   system-manager-eval-tests = import ./system-manager-eval-tests.nix {
     inherit pkgs systemManagerModule systemManagerLib;
+  };
+
+  user-memory-eval-tests = import ./user-memory-eval-tests.nix {
+    inherit pkgs nixpkgs homeModule;
   };
 }

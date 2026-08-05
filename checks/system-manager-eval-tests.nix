@@ -129,7 +129,55 @@ let
     };
   };
 
+  cfg-user-memory = evalFor {
+    nixram.profileSync.package.enable = true;
+    nixram.dmemcg = {
+      package.enable = true;
+      booster.state = "disabled";
+    };
+  };
+
+  cfg-dmemcg-enabled = evalFor {
+    nixram.dmemcg = {
+      package.enable = true;
+      booster = {
+        state = "enabled";
+        command = "/usr/bin/dmemcg-booster --use-system-bus";
+      };
+    };
+  };
+
+  dmemcgEnabledWithoutCommandFails = evalFails {
+    nixram.dmemcg = {
+      package.enable = true;
+      booster.state = "enabled";
+    };
+  };
+
   results = [
+    # --- user-memory package and daemon policy ------------------------------
+    (check "sm-user-memory/publishes-arch-packages"
+      (cfg-user-memory.nixram.archPackages == [ "profile-sync-daemon" "dmemcg-booster" ])
+      "got: ${builtins.toJSON cfg-user-memory.nixram.archPackages}")
+
+    (check "sm-user-memory/disabled-booster-masks-foreign-unit"
+      (lib.elem "dmemcg-booster-system.service" cfg-user-memory.systemd.maskedUnits)
+      "got: ${builtins.toJSON cfg-user-memory.systemd.maskedUnits}")
+
+    (check "sm-user-memory/enabled-booster-renders-service"
+      (cfg-dmemcg-enabled.systemd.services.dmemcg-booster-system.serviceConfig.ExecStart
+        == "/usr/bin/dmemcg-booster --use-system-bus")
+      "got: ${builtins.toJSON cfg-dmemcg-enabled.systemd.services.dmemcg-booster-system}")
+
+    (check "sm-user-memory/enabled-booster-preflights-dmem-capacity"
+      (lib.hasInfix "/sys/fs/cgroup/dmem.capacity"
+        cfg-dmemcg-enabled.system-manager.preActivationAssertions.dmemcg-booster-capacity.script)
+      "script: ${cfg-dmemcg-enabled.system-manager.preActivationAssertions.dmemcg-booster-capacity.script}")
+
+    (check "sm-user-memory/enabled-booster-requires-backend-command"
+      dmemcgEnabledWithoutCommandFails
+      "an enabled dmemcg-booster must not assume a distro binary path")
+
     # --- level-24G-defaults (mode = zswap) --------------------------------
     (check "sm-24G/sysctl-file-sorts-after-distro-defaults"
       # Regression guard: CachyOS ships its own conflicting sysctl values in

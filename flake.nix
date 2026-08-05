@@ -1,5 +1,5 @@
 {
-  description = "Coherent memory-pressure tuning (zram/zswap + PSI-armed systemd-oomd + sysctls) for a given RAM level, as one small NixOS module.";
+  description = "Coherent host-memory policy: zram/zswap, PSI-armed systemd-oomd, sysctls, and opt-in user working-set policies.";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.system-manager.url = "github:numtide/system-manager";
@@ -74,6 +74,11 @@
       systemManagerModules.nixram = import ./system-manager/default.nix;
       systemManagerModules.default = self.systemManagerModules.nixram;
 
+      # User-session memory policy is necessarily a Home Manager output:
+      # system-manager deliberately has no systemd.user.services surface.
+      homeManagerModules.nixram = import ./home/default.nix;
+      homeManagerModules.default = self.homeManagerModules.nixram;
+
       apps = forAllSystems (system: {
         detect-level = {
           type = "app";
@@ -88,6 +93,7 @@
           nixramModule = self.nixosModules.nixram;
           systemManagerModule = self.systemManagerModules.nixram;
           systemManagerLib = system-manager.lib;
+          homeModule = self.homeManagerModules.nixram;
         }
       );
     };

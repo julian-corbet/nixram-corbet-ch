@@ -71,6 +71,7 @@ in
     ./sysctls.nix
     ./oomd.nix
     ./zswap-boot-params-check.nix
+    ./user-memory.nix
   ];
 
   options.nixram = {

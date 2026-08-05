@@ -46,7 +46,7 @@
 <!-- ORIENTATION -->
 <div class="docs-section">
   <h2>How to read this page</h2>
-  <p>nixram is one NixOS module. You declare how much RAM the machine has. From that one declaration it configures a compressed swap device that lives in RAM (or a compressed cache in front of real disk swap), an out-of-memory watchdog, and a set of kernel memory settings.</p>
+  <p>nixram's core has NixOS and system-manager modules. You declare how much RAM the machine has. From that one declaration it configures a compressed swap device that lives in RAM (or a compressed cache in front of real disk swap), an out-of-memory watchdog, and a set of kernel memory settings.</p>
   <p>Everything that varies by RAM size comes from the same row of the same table, so those values cannot contradict each other. The few settings that are properties of the swap medium rather than of the machine are constants, listed under <a href="#constants">Shared settings</a>.</p>
   <p>This page assumes you are comfortable with systemd and NixOS, and assumes nothing about kernel memory management. The words you need are defined as you meet them, and every kernel term used anywhere on this page has a plain definition in the <a href="#glossary">glossary at the end</a>.</p>
   <p>Everything here is sourced. Each value carries a mark saying where it came from: someone else's published work, our own reasoning, or the kernel's own default left alone on purpose.</p>
@@ -112,6 +112,14 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- USER-SESSION POLICY -->
+<div class="docs-section" id="user-session-policy">
+  <h2>User-session memory policy</h2>
+  <p>The core module manages host-wide memory pressure. A separate Home Manager output owns the parts that belong to a logged-in account: Profile Sync Daemon configuration and user units, plus the user half of an optional device-memory foreground-session booster.</p>
+  <p>Profile Sync Daemon only runs with an explicit browser list, so it never silently adopts every supported browser it finds. On a distro-managed host, the host backend supplies PSD's command and package; the Home Manager module supplies the configuration and the user service.</p>
+  <p>The device-memory booster is deliberately narrow. It is not a general container or GPU-sharing manager. Before the system service can start, nixram checks that the current cgroup root exposes <code>/sys/fs/cgroup/dmem.capacity</code>; without it, the upstream daemon cannot calculate the device-memory limits it needs to apply.</p>
 </div>
 
 <!-- THE WORDS YOU NEED FIRST -->

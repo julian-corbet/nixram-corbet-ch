@@ -1,10 +1,11 @@
 # nixram
 
-nixram is one small NixOS module: declare a RAM level, get coherent
-zram/zswap, systemd-oomd, and `vm.*` sysctl tuning derived from it. Instead
-of hand-picking a dozen loosely-related knobs and hoping they agree with each
-other, you set `nixram.level` once and the rest follows from a
-single table (`levels.nix`).
+nixram is a small host-memory policy module family: declare a RAM level, get
+coherent zram/zswap, systemd-oomd, and `vm.*` sysctl tuning derived from it.
+Instead of hand-picking a dozen loosely-related knobs and hoping they agree
+with each other, you set `nixram.level` once and the rest follows from a
+single table (`levels.nix`). The core has NixOS and system-manager outputs;
+the user-session extension is a Home Manager output.
 
 ## Who it's for
 
@@ -72,6 +73,21 @@ nixram = {
 There is no default level and no eval-time auto-detection — see
 [faq.md](faq.md#why-does-level-have-no-default-and-no-eval-time-auto-detection)
 for why that's a deliberate design choice, not a missing convenience.
+
+## User-session memory policy
+
+The optional Home Manager module owns working sets that belong to a login
+session: Profile Sync Daemon configuration and its user units, plus the user
+half of a dmem cgroup foreground-session booster. This separation is
+structural: system-manager can manage system units and files, but it cannot
+render `systemd --user` services.
+
+PSD always requires an explicit browser list, avoiding its upstream
+auto-discovery behavior. The dmem booster is opt-in and is only enabled when
+the host supplies its package command and its cgroup root exposes
+`/sys/fs/cgroup/dmem.capacity`; without that capability the upstream daemon
+cannot calculate the device-memory limit it writes. See the [README](../README.md)
+for the complete system-manager and Home Manager examples.
 
 ## Further reading
 
