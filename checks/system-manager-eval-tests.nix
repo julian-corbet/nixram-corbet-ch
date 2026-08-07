@@ -129,7 +129,16 @@ let
     };
   };
 
+  # Same "state the level, like any real consumer would" contract as every
+  # other fixture in this file (see cfg-24G) -- these three were the only
+  # ones that omitted it, which meant they never actually reached the
+  # user-memory assertions they claim to test: `makeSystemConfig` throws on
+  # `nixram.level must be set explicitly` before `.config` is even
+  # reachable (see the `evalFor`/`evalFails` comment above), so
+  # `dmemcgEnabledWithoutCommandFails` in particular was passing for the
+  # wrong reason -- any eval failure looked like a pass, level-unset or not.
   cfg-user-memory = evalFor {
+    nixram.level = "24G";
     nixram.profileSync.package.enable = true;
     nixram.dmemcg = {
       package.enable = true;
@@ -138,6 +147,7 @@ let
   };
 
   cfg-dmemcg-enabled = evalFor {
+    nixram.level = "24G";
     nixram.dmemcg = {
       package.enable = true;
       booster = {
@@ -148,6 +158,7 @@ let
   };
 
   dmemcgEnabledWithoutCommandFails = evalFails {
+    nixram.level = "24G";
     nixram.dmemcg = {
       package.enable = true;
       booster.state = "enabled";

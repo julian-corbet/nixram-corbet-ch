@@ -61,7 +61,14 @@ let
 
   results = [
     (check "profile-sync/writes-explicit-browser-list"
-      (lib.hasInfix "BROWSERS=( 'firefox' )" enabled.xdg.configFile."psd/psd.conf".text
+      # Match via lib.escapeShellArg itself rather than a hardcoded "'firefox'"
+      # literal: this check was passing "'firefox'" and never actually matched
+      # (nixpkgs' escapeShellArg only quotes a string when it contains
+      # characters outside `[[:alnum:],._+:@%/-]+`, and "firefox" is plain
+      # alnum -- it renders unquoted). The module is correct either way; the
+      # point being tested is "browsers go through escapeShellArg", which this
+      # now proves without assuming which shape that function's output takes.
+      (lib.hasInfix "BROWSERS=( ${lib.escapeShellArg "firefox"} )" enabled.xdg.configFile."psd/psd.conf".text
         && lib.hasInfix "BACKUP_LIMIT=3" enabled.xdg.configFile."psd/psd.conf".text)
       "text: ${enabled.xdg.configFile."psd/psd.conf".text}")
 
