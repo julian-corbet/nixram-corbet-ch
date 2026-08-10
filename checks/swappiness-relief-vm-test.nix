@@ -288,5 +288,31 @@ pkgs.testers.nixosTest {
         machine.wait_until_succeeds(
             "test $(cat /proc/sys/vm/swappiness) -eq 10", timeout=180
         )
+
+    with subtest("out-of-band drift at rest is reconciled back to baseline"):
+        # The valve used to be a pure edge-trigger: it wrote swappiness only
+        # when crossing between baseline and relief, and never re-checked the
+        # value while at rest. A write from outside -- a tuning experiment, a
+        # privileged container on the shared kernel, a stray sysctl -w --
+        # therefore stuck indefinitely while the unit kept reporting success.
+        # corbet-server was found live at 150 with 10 declared and the last
+        # transition 12 days old, which is what this subtest pins.
+        #
+        # 150 deliberately, not some value below the relief ceiling: it is the
+        # real observed drift, and being ABOVE relief (60) also proves the
+        # reconcile is not just the relief branch firing by luck.
+        machine.succeed("echo 150 > /proc/sys/vm/swappiness")
+        machine.succeed("test $(cat /proc/sys/vm/swappiness) -eq 150")
+        machine.succeed("test $(cat /run/nixram-swappiness-relief.state) = baseline")
+        # One timer period (30s) plus slack; no pressure is being generated,
+        # so this can only be the at-rest reconcile path.
+        machine.wait_until_succeeds(
+            "test $(cat /proc/sys/vm/swappiness) -eq 10", timeout=90
+        )
+        machine.succeed(
+            "journalctl -u nixram-swappiness-relief.service | grep -q 'was 150 out-of-band'"
+        )
+        # State must not have been perturbed: reconciling is not a transition.
+        machine.succeed("test $(cat /run/nixram-swappiness-relief.state) = baseline")
   '';
 }

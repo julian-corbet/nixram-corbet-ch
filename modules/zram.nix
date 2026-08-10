@@ -176,6 +176,36 @@ let
         echo "$relief" > /proc/sys/vm/swappiness
         echo relief > "$state_file"
         echo "nixram: memory pressure rising (some avg10=''${avg10}% >= ''${high}%) -- entering relief, swappiness -> $relief" >&2
+      else
+        # Reconcile out-of-band drift. This branch used to do nothing at all,
+        # which made the valve a pure edge-trigger: it wrote swappiness only
+        # when CROSSING between baseline and relief, and never checked that
+        # the value it believed in was still the value the kernel had. Anyone
+        # -- a tuning experiment, a privileged container sharing this kernel
+        # (vm.* is not namespaced), a stray sysctl -w -- could move swappiness
+        # and the valve would sit at state=baseline forever, reporting success
+        # every 30s while the declared value was not in effect.
+        #
+        # That is not hypothetical: corbet-server was found at a live
+        # swappiness of 150 with 10 declared, state=baseline on disk, and the
+        # last real transition logged 12 days earlier. The reluctant-tier
+        # design (low static baseline + a valve that briefly lifts to 60) was
+        # not merely overridden but inverted, since 150 sits above even the
+        # relief ceiling -- and the valve was dead code in that state, because
+        # it can only ever ENTER relief from a baseline it never re-asserts.
+        #
+        # $baseline is the RESOLVED sysctl value, not the raw tier constant
+        # (see the comment where it is defined), so re-asserting it enforces
+        # whatever the host actually declared -- it does not drag a host's own
+        # override back to nixram's default. The cost is that runtime tuning
+        # by hand no longer sticks: on a declaratively-configured host that is
+        # the intended outcome, and the place to change swappiness is the
+        # config, not /proc.
+        current=$(cat /proc/sys/vm/swappiness)
+        if [ "$current" != "$baseline" ]; then
+          echo "$baseline" > /proc/sys/vm/swappiness
+          echo "nixram: swappiness was $current out-of-band, expected $baseline at rest -- reconciled" >&2
+        fi
       fi
     else
       leaving=$(awk -v v="''${avg60:-100}" -v l="$low" 'BEGIN { print (v < l) ? 1 : 0 }')
