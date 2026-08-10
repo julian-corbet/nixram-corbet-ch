@@ -422,28 +422,65 @@ in nixram sets it by default.
 **Source:** none — deliberately the kernel's own computed default, not a
 sourced or extrapolated nixram value.
 
-## [7] MGLRU min_ttl_ms = 1000
+## [7] MGLRU min_ttl_ms = 0
 
-**Decision:** `min_ttl_ms = 1000` under `/sys/kernel/mm/lru_gen/`, applied via
-a systemd-tmpfiles `w` rule (not a sysctl — MGLRU's tunables live outside
-`/proc/sys`), at every level regardless of `mode`.
+**Decision:** `min_ttl_ms = 0` — the kernel default — under
+`/sys/kernel/mm/lru_gen/`, applied via a systemd-tmpfiles `w` rule (not a
+sysctl — MGLRU's tunables live outside `/proc/sys`), at every level regardless
+of `mode`.
 
-**Honesty:** sourced, flagged. The value and the thrash-prevention rationale
-come from the kernel's own MGLRU admin-guide documentation, which offers 1000
-as its example value. The flag: the kernel docs frame this knob as guidance
-"for users who do not have oomd" running — nixram runs it *alongside* oomd as
-a complementary layer instead, and its interaction with oomd under real,
-months-long uptime is unmeasured.
+**Honesty:** own-measured. This entry previously carried `1000`, graded
+"sourced, flagged", and the flag said the value's interaction with oomd "under
+real, months-long uptime is unmeasured" and asked for a tracked experiment.
+The measurement arrived unasked, from production, on two hosts at opposite
+ends of the tier range. It came back negative, so the value is now the kernel
+default and the grade is own-measured rather than sourced.
 
-**Reasoning:** MGLRU (multi-gen LRU) can, under pressure, evict pages fast
-enough to cause thrashing before the reclaim algorithm's own generational
-aging has gathered enough signal; `min_ttl_ms` enforces a minimum dwell time
-per generation to prevent that. The kernel doc's example value is 1000ms.
-nixram applies it everywhere as a second, complementary layer alongside
-PSI-driven oomd, not as a replacement for it.
+**Reasoning:** `min_ttl_ms` does not merely delay eviction. When the oldest
+generation is younger than the dwell time, `lru_gen_age_node()` calls
+`out_of_memory()` **directly from kswapd**, bypassing the allocation-failure
+path entirely. That is the documented behaviour, not a bug — the kernel's
+admin-guide frames the knob as thrash prevention "for users who do not have
+oomd", i.e. it is a *substitute* OOM trigger, and it fires on generation age
+rather than on memory scarcity. Running it alongside oomd does not make it
+complementary; it adds a second killer whose trigger condition has nothing to
+do with how much memory is free.
 
-**Source:** kernel MGLRU admin-guide (`min_ttl_ms`, thrash-prevention
-guidance, example value).
+**Measured, corbet-server (128G tier, 125 GiB RAM, 12 days uptime):** four
+global OOM kills, every one invoked by `kswapd0`, all with the same stack:
+
+    oom_kill_process+0x1c2/0x240
+    out_of_memory+0x4bb/0x5e0
+    kswapd+0x1172/0x1d50
+
+The kernel's own dump at the first kill:
+
+    Node 0 Normal free:77780580kB min:66048kB low:1354044kB high:2642040kB
+    active_file:581716kB inactive_file:208956kB ... all_unreclaimable? no
+    Free swap = 95666548kB / Total swap = 98843900kB
+
+74 GiB free — roughly 29x the high watermark — 790 MB of reclaimable page
+cache, 91 GiB of free swap, and `all_unreclaimable? no`. There was no memory
+shortage of any kind. It killed `tuwunel`, `victoria-metrics` and `litellm`
+twice: production workloads, on a box with 74 GiB free. No ordinary reclaim
+path can reach `out_of_memory()` in that state; `kswapd` calling it directly
+is only reachable through the `min_ttl` branch.
+
+**Measured, corbet-eu-vultr (512M tier, 456 MiB RAM):** the same signature at
+the other extreme — 263 kills in one boot, every one through
+`kswapd -> balance_pgdat -> out_of_memory`, with ~290 MB of reclaimable page
+cache present throughout. Here memory genuinely was tight, so on its own this
+host would have been arguable. corbet-server is what makes it conclusive: the
+two share a mechanism, not a memory shortage.
+
+**Consequence of 0:** the kernel's own OOM killer and the PSI-driven oomd layer
+remain exactly as they were. What is removed is a third killer that fired on
+generation age. The thrash-prevention this knob offers is real, but it is
+purchased with unconditional OOM kills, and nothing in these two measurements
+showed thrashing that the remaining layers did not already handle.
+
+**Source:** kernel MGLRU admin-guide (`min_ttl_ms`, thrash-prevention guidance,
+example value 1000 — adopted previously, superseded here by own measurement).
 
 ## [8] systemd-oomd disabled at 256M
 

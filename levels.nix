@@ -133,7 +133,7 @@
       watermarkScaleFactor = 200;   # extrapolated -- rationale.md [5]
       watermarkBoostFactor = 0;     # sourced -- rationale.md [5]
       minFreeKbytesOverride = null; # default -- rationale.md [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- rationale.md [7]
+      mglruMinTtlMs = 0;            # own-measured -- rationale.md [7]
 
       oomd = {
         enable = false;
@@ -161,7 +161,7 @@
       watermarkScaleFactor = 200;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8] (on above 256M)
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -190,7 +190,7 @@
       watermarkScaleFactor = 200;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -218,7 +218,7 @@
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -241,7 +241,7 @@
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -264,7 +264,7 @@
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -287,7 +287,7 @@
       watermarkScaleFactor = 150;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -312,7 +312,7 @@
       # rationale.md [5].
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -335,7 +335,7 @@
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -358,7 +358,7 @@
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -385,7 +385,7 @@
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -408,7 +408,7 @@
       watermarkScaleFactor = 125;   # sourced -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -448,7 +448,7 @@
       watermarkScaleFactor = 100;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]
@@ -471,7 +471,7 @@
       watermarkScaleFactor = 100;   # extrapolated -- [5]
       watermarkBoostFactor = 0;     # sourced -- [5]
       minFreeKbytesOverride = null; # default -- [6]
-      mglruMinTtlMs = 1000;         # sourced, flagged -- [7]
+      mglruMinTtlMs = 0;            # own-measured -- [7]
       oomd = {
         enable = true;              # extrapolated -- [8]
         pressureLimitPercent = 60;  # sourced -- [10]

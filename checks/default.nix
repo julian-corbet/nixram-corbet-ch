@@ -360,8 +360,13 @@ let
       (cfg-4G.systemd.oomd.enable == true)
       "got: ${builtins.toJSON cfg-4G.systemd.oomd.enable}")
 
+    # Exact match, not hasInfix: this asserted `min_ttl_ms` AND `1000` as two
+    # separate substrings, so it would have passed on any rule mentioning the
+    # knob and any 1000 anywhere in the line. The value is now 0 (rationale.md
+    # [7]), and "0" as a loose infix would match almost anything, so pin the
+    # whole rule.
     (check "level-4G-defaults/tmpfiles-min-ttl-ms"
-      (lib.any (r: lib.hasInfix "min_ttl_ms" r && lib.hasInfix "1000" r) cfg-4G.systemd.tmpfiles.rules)
+      (lib.any (r: r == "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 0") cfg-4G.systemd.tmpfiles.rules)
       "rules: ${builtins.toJSON cfg-4G.systemd.tmpfiles.rules}")
 
     (check "level-4G-defaults/recompress-timer-exists"

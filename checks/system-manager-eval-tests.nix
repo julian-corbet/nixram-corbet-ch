@@ -236,8 +236,10 @@ let
       (cfg-24G.systemd.services ? "nixram-sysctl-reapply")
       "systemd.services keys: ${builtins.toJSON (builtins.attrNames cfg-24G.systemd.services)}")
 
+    # Exact match rather than two loose infixes -- see the same check's comment
+    # in checks/default.nix. Value is 0 as of rationale.md [7].
     (check "sm-24G/tmpfiles-min-ttl-ms"
-      (lib.any (r: lib.hasInfix "min_ttl_ms" r && lib.hasInfix "1000" r) cfg-24G.systemd.tmpfiles.rules)
+      (lib.any (r: r == "w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 0") cfg-24G.systemd.tmpfiles.rules)
       "rules: ${builtins.toJSON cfg-24G.systemd.tmpfiles.rules}")
 
     (check "sm-24G/root-slice-pressure-limit"
