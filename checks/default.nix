@@ -116,9 +116,16 @@ let
     nixram.level = "4G";
     nixram.zram.priorityOverride = 50;
   };
+  # A BARE algorithm on purpose. This fixture used "zstd(level=12)", which
+  # proved the override wins but enshrined an undeliverable example: for a
+  # recompression (prio >= 1) algorithm zram-generator writes params to
+  # /sys/block/zramN/recompress, whose parser knows only
+  # type/max_pages/threshold/algo/priority and silently drops "level" -- see
+  # the canonical note on the 2G tier in levels.nix. Any distinct value proves
+  # the override, so it should be one an operator can copy.
   cfg-override-recompression-algorithm = evalFor {
     nixram.level = "4G";
-    nixram.zram.recompressionAlgorithmOverride = "zstd(level=12)";
+    nixram.zram.recompressionAlgorithmOverride = "lzo";
   };
   cfg-override-compression-algorithm = evalFor {
     nixram.level = "4G";
@@ -299,7 +306,7 @@ let
       (cfg-4G.services.zram-generator.settings.zram0 == {
         zram-size = "ram * 75 / 100";
         zram-resident-limit = "ram * 25 / 100";
-        compression-algorithm = "lz4 zstd(level=3) (type=idle)";
+        compression-algorithm = "lz4 zstd (type=idle)";
         swap-priority = 100;
       })
       "got: ${builtins.toJSON cfg-4G.services.zram-generator.settings.zram0}")
@@ -746,11 +753,11 @@ let
       "got: ${builtins.toJSON cfg-override-priority.services.zram-generator.settings.zram0.swap-priority}")
 
     (check "override-wins/recompression-algorithm-override"
-      (cfg-override-recompression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lz4 zstd(level=12) (type=idle)")
+      (cfg-override-recompression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lz4 lzo (type=idle)")
       "got: ${builtins.toJSON cfg-override-recompression-algorithm.services.zram-generator.settings.zram0.compression-algorithm}")
 
     (check "override-wins/compression-algorithm-override"
-      (cfg-override-compression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lzo-rle zstd(level=3) (type=idle)")
+      (cfg-override-compression-algorithm.services.zram-generator.settings.zram0.compression-algorithm == "lzo-rle zstd (type=idle)")
       "got: ${builtins.toJSON cfg-override-compression-algorithm.services.zram-generator.settings.zram0.compression-algorithm}")
 
     (check "override-wins/zswap-accept-threshold-percent"

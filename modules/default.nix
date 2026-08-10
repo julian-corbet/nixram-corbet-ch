@@ -268,6 +268,97 @@ in
       '';
     };
 
+    # ── pageClusterHint / vfsCachePressureHint: the rest of that surface ──
+    #
+    # `swappinessHint` on its own never made a mode="none" host whole.
+    # modules/sysctls.nix renders FOUR swap-behaviour knobs under
+    # `mode = "zram"` -- swappiness, page-cluster, vfs_cache_pressure and
+    # overcommit_memory -- and a host re-rendering them through its own
+    # config layer could read exactly one of them from here. The others
+    # became literals somewhere else: both consuming hosts write their own
+    # `vm.page-cluster = 0`, and the dire-tier `vm.vfs_cache_pressure =
+    # 200` lives in the infra profile this project measured it FROM. Second
+    # copies, exactly what the hint mechanism exists to prevent -- change
+    # the number here and it reaches nobody, and nothing anywhere says so.
+    #
+    # The two SHAPES differ, because the two numbers are different kinds
+    # of fact and flattening them into one shape would hand out a wrong
+    # one:
+    #
+    #   pageClusterHint      a property of the swap MEDIUM, not of the box
+    #                        (docs/rationale.md [4]) -- one value at every
+    #                        level, for every zram device. Never null while
+    #                        nixram is enabled: a RAM-backed medium always
+    #                        has an answer, and it does not depend on
+    #                        `level` at all.
+    #
+    #   vfsCachePressureHint per-TIER, and only dire tiers have a value at
+    #                        all -- see its definition in the config block
+    #                        below for the evidence and for why the scope
+    #                        is what it is. `null` on a reluctant tier
+    #                        means "nixram has no opinion, leave the kernel
+    #                        default", which is the same action a caller
+    #                        takes when nixram is disabled entirely, so the
+    #                        two nulls never need telling apart.
+    #
+    # Both are ZRAM-MEDIUM values, unconditionally, exactly like
+    # `swappinessHint`: they are what sysctls.nix renders under
+    # `mode = "zram"`, handed to a caller whose zram device is real but
+    # built by a different mechanism. They are deliberately NOT the
+    # zswap-mode numbers (page-cluster 2 on SSD, vfs_cache_pressure 80) --
+    # a zswap host has nixram's own sysctl layer rendering for it and no
+    # reason to read a hint at all.
+    #
+    # Unlike `swappinessHint`, whose number lives in levels.nix and is read
+    # from there by both the hint and the renderer, these two had no
+    # levels.nix field: their values were private literals inside
+    # sysctls.nix. So these options are the DEFINITION SITE, and
+    # sysctls.nix renders FROM them -- one number, not a published copy of
+    # a rendered one. The cost is that a host overriding a "read-only"
+    # hint would also move what nixram renders; that is the same escape
+    # hatch every other layer here has, and it beats two literals that can
+    # silently disagree.
+    #
+    # No `overcommitMemoryHint`. That knob's only value is the
+    # reluctant-tier 1, and every mode="none" consumer in this project is a
+    # dire tier, where nixram deliberately renders nothing (see
+    # sysctls.nix). A hint that would be `null` for every host able to read
+    # it is option surface with no source of truth behind it; the day a
+    # reluctant-tier mode="none" host exists, it earns one.
+    pageClusterHint = mkOption {
+      type = types.nullOr (types.ints.between 0 31);
+      # Deliberately NOT `readOnly = true` -- see swappinessHint's own
+      # comment above for the exact reason (readOnly plus the `default`
+      # this needs is itself two definitions, and breaks `nix flake
+      # check`).
+      default = null;
+      description = ''
+        Read-only: `vm.page-cluster` for a zram swap medium -- 0, i.e.
+        read 2^0 = one page per swap-in (see docs/rationale.md [4]).
+        Exposed regardless of `mode`, for a caller that runs
+        `mode = "none"` because its zram device is created by another
+        mechanism. modules/sysctls.nix renders this same option under
+        `mode = "zram"`, so what a caller reads here and what nixram
+        writes itself cannot become two different numbers. `null` unless
+        nixram is enabled.
+      '';
+    };
+
+    vfsCachePressureHint = mkOption {
+      type = types.nullOr types.ints.unsigned;
+      # Not `readOnly` for the same reason as the two hints above.
+      default = null;
+      description = ''
+        Read-only: `vm.vfs_cache_pressure` for the active level on a zram
+        medium, or `null` where nixram has no opinion -- which today is
+        every reluctant tier (2G-128G), as well as a disabled or
+        level-less nixram. `null` means "render nothing, leave the kernel
+        default"; that is the right action in both cases, so the two are
+        not distinguished. Like `pageClusterHint` this is the definition
+        modules/sysctls.nix itself renders from, not a second copy of it.
+      '';
+    };
+
     mode = mkOption {
       type = types.enum [ "zram" "zswap" "none" ];
       default = "zram";
@@ -857,6 +948,62 @@ in
       # reclaim livelock resumed. 40% holds on the same workload. This is
       # the one number here with an incident behind it.
     };
+
+    # ── pageClusterHint's value ─────────────────────────────────────────
+    #
+    # sourced -- docs/rationale.md [4]. 0 means "read 2^0 = one page per
+    # swap-in". A zram fault is a decompression, not a seek, so the
+    # readahead that pays for itself on a rotating (kernel default 3) or
+    # even an SSD-backed swap device (zswap mode's 2) only burns CPU here
+    # and fills RAM with pages nobody asked for. A property of the MEDIUM,
+    # identical at every level -- which is why this is a flat constant
+    # while its sibling below is tier-scoped.
+    zramPageCluster = 0;
+
+    # ── vfsCachePressureHint's value, and why only dire tiers get one ───
+    #
+    # own-measured, real production evidence -- verified live via SSH against
+    # three actual boxes running zram (none of them nixram itself; all three
+    # predate it), then cross-checked against their own source repos rather
+    # than trusting the live sysctl dump alone. That second step is the whole
+    # method: a value that looks like a stale leftover default can be a
+    # deliberate, documented choice, and a value that looks deliberate can
+    # turn out to be nobody's decision at all. Only the config history tells
+    # the two apart, and on this sysctl it separated all three readings.
+    #
+    # e2-micro (1G, a real "dire" tier) runs vfs_cache_pressure=200 in
+    # production -- not inherited and not accidental: it is "Step 5" of a
+    # documented, red-teamed hardening bisection (infra
+    # modules/nixos/profiles/base.nix), chosen specifically to evict
+    # inode/dentry caches aggressively once memory gets genuinely tight on a
+    # box with almost nothing to spare. vultr (512M, dire) declares nothing
+    # for this sysctl and reads the kernel default (100) live.
+    #
+    # NO RELUCTANT-TIER EVIDENCE EXISTS ANYWHERE IN THIS PROJECT. The
+    # 128G-class reference server reads 50 live, and that 50 is not a
+    # memory-tuning decision by anyone: the host declares nothing for this
+    # sysctl. The value is written into its kernel by a privileged desktop
+    # container that shares it: the container's distro ships
+    # vm.vfs_cache_pressure=50 -- alongside vm.swappiness=100 and
+    # vm.page-cluster=0 -- in its own /usr/lib/sysctl.d, and vm.* sysctls are
+    # not namespaced, so a container applying its desktop defaults retunes
+    # the host underneath it. Nothing masks that file, so the host's reading
+    # is contaminated today and stays that way until something does; masking
+    # it is a host-side decision, not this module's, and either way the 50
+    # never becomes evidence. A number nobody chose was never a data point.
+    #
+    # The dire-only scope survives the loss of that (false) reluctant-tier
+    # reading, on the ground it should have rested on all along: there is no
+    # reluctant-tier measurement to extrapolate from. And the weak signal
+    # that does exist points the OTHER WAY -- that container distro's own
+    # desktop default is 50, and this project's own directed zswap value is
+    # 80, both BELOW the kernel's 100, i.e. toward RETAINING dentry/inode
+    # cache on a box with RAM to spare, while 200 evicts twice as eagerly as
+    # the default. A reluctant tier has enough true RAM and enough file cache
+    # that aggressive dentry/inode eviction buys it nothing, so pushing a
+    # dire-tier survival value up the ladder is the one direction the
+    # available evidence actively argues against.
+    zramDireVfsCachePressure = 200;
   in {
     assertions = [
       {
@@ -1017,10 +1164,22 @@ in
     # Read-only "hint" surface -- see each option's own doc comment above
     # for why these exist (the mode="none" blind spot: a swap device that
     # is real but managed by a different mechanism than this module's own
-    # rendering). Computed unconditionally from `activeLevel`/the lookup
-    # table, independent of `mode` -- a caller decides for itself whether
+    # rendering). Computed unconditionally from `activeLevel`/the constants
+    # above, independent of `mode` -- a caller decides for itself whether
     # its own situation calls for reading them.
+    #
+    # These four are the complete set of numbers a mode="none" host with a
+    # real zram device needs from nixram: the three swap-behaviour sysctls
+    # modules/sysctls.nix would have rendered for it (overcommit_memory
+    # excepted -- it has no dire-tier value at all), plus the pool size.
     nixram.swappinessHint = activeLevel.swappiness;
+    nixram.pageClusterHint = zramPageCluster;
+    # null on reluctant tiers -- "no opinion, leave the kernel default".
+    # Keyed on the same per-tier flag sysctls.nix used to scope its own
+    # rendering, so the dire/reluctant split is stated once and read twice
+    # rather than decided twice.
+    nixram.vfsCachePressureHint =
+      if activeLevel.swappinessReliefEnableByDefault then null else zramDireVfsCachePressure;
     nixram.zram.legacyPercent = legacyZramPercentByLevel.${activeLevelName} or null;
   });
 }

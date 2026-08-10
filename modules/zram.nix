@@ -85,10 +85,60 @@ let
   # the same breath" -- the latter would recompress the entire device
   # every single run, since everything looks idle the instant after
   # being marked). Only THEN does it mark the current resident set idle
-  # again, becoming the input for the NEXT idle run. Guarded on kernel
-  # recompression support at runtime: skips silently (with a log line)
-  # if /sys/block/zram0/recompress doesn't exist, e.g. pre-6.2 kernels
-  # or CONFIG_ZRAM_MULTI_COMP disabled.
+  # again, becoming the input for the NEXT idle run.
+  #
+  # FOUR RUNTIME GATES, each of which logs and exits 0. All four describe the
+  # ENVIRONMENT rather than a fault this run could repair, and the timer fires
+  # again in minutes, so a red unit would only be noise:
+  #
+  #   1. /sys/block/zram0/recompress absent -- pre-6.2 kernel, or
+  #      CONFIG_ZRAM_MULTI_COMP disabled.
+  #   2. the device node exists but the device is not initialised
+  #      (initstate != 1). A real boot race, not a theoretical one: the timer
+  #      carries Persistent=true, so it fires a catch-up run the moment
+  #      timers.target is reached, and on corbet-server that landed one second
+  #      BEFORE systemd-zram-setup@zram0 had set disksize. The kernel's
+  #      recompress_store() bails with -EINVAL while !init_done(zram), so such a
+  #      run can do nothing except fail.
+  #   3. no recompression algorithm registered -- recomp_algorithm reads back
+  #      empty. Recompression is then impossible by construction, and phase 1's
+  #      write returns EINVAL on every attempt.
+  #   4. CPU PSI says the box is not idle.
+  #
+  # Gate 3 is the one that actually cost something. When a `switch` changes the compression
+  # algorithms of a zram device that is already initialised, the kernel refuses
+  # the primary ("zram: Can't change algorithm for initialized device", EBUSY),
+  # so a host can sit for days with a live device whose registered algorithms are
+  # the ones it booted with and not the ones now declared. If those boot-time
+  # algorithms had no secondary, every recompression run is an EINVAL until the
+  # next reboot. modules/zram-drift.nix is what makes that divergence visible;
+  # this unit's job is only to not thrash while it lasts.
+  #
+  # WHY THE TWO PHASES NO LONGER SHARE A FATE. `set -e` used to turn phase 1's
+  # write into an immediate unit failure, which meant phase 2 -- the idle
+  # MARKING -- never ran at all. That is the worst possible coupling, because
+  # phase 2 is what feeds the NEXT run: once phase 1 starts failing the device
+  # stops being marked, so the mechanism cannot resume on its own even after the
+  # condition that broke phase 1 has gone away. Measured on corbet-server: 36
+  # consecutive failed runs, one every 15 minutes from 04:00 to 12:45, each
+  # dying on `echo "type=idle" > /sys/block/zram0/recompress` with "write error:
+  # Invalid argument" while recomp_algorithm was empty. The journal carried
+  # `Failed with result 'exit-code'` and nothing else, and not one page was
+  # marked idle in that entire window.
+  #
+  # errexit stays ON -- the fix is to say which failures mean what, not to stop
+  # checking. The gates absorb everything that is merely the environment; phase
+  # 1's write is then allowed to fail WITHOUT taking the run down, so phase 2
+  # still executes; and the run exits non-zero at the end if either phase really
+  # failed, so a genuine fault is still a red unit rather than a warning nobody
+  # reads. It simply can no longer skip work on its way out.
+  #
+  # Reads use the `read` builtin rather than `cat`, in the same spirit as
+  # nixram-zswap-disable below: the unit's PATH is whatever `path` renders to and
+  # nothing else. Here that is gawk plus the set NixOS appends to every unit
+  # (coreutils, findutils, gnugrep, gnused, systemd), so `cat` would in fact
+  # resolve -- but a builtin cannot be broken by a future `path` edit, and these
+  # are single-line sysfs reads where `cat` buys nothing.
   recompressionScript = pkgs.writeShellScript "nixram-zram-recompress" ''
     set -euo pipefail
 
@@ -96,6 +146,20 @@ let
 
     if [ ! -e "$dev/recompress" ]; then
       echo "nixram: $dev/recompress not present (kernel lacks zram multi-compression support or it's disabled) -- skipping idle recompression this run" >&2
+      exit 0
+    fi
+
+    # Gate 2: initialised? An uninitialised device rejects both phases.
+    if ! read -r initstate < "$dev/initstate" || [ "$initstate" != "1" ]; then
+      echo "nixram: zram0 exists but is not initialised yet (initstate is not 1) -- systemd-zram-setup@zram0 has probably not finished; skipping this run (will retry next timer tick)" >&2
+      exit 0
+    fi
+
+    # Gate 3: is there anything to recompress WITH? recomp_algorithm lists one
+    # line per registered secondary algorithm and is empty when there are none,
+    # so a failed read is exactly the "none registered" case.
+    if ! read -r recomp_algs < "$dev/recomp_algorithm"; then
+      echo "nixram: no recompression algorithm registered on zram0 ($dev/recomp_algorithm is empty) -- the live device cannot recompress; skipping this run (see nixram-zram-drift for whether the live device still matches the declaration)" >&2
       exit 0
     fi
 
@@ -120,11 +184,39 @@ let
 
     # Phase 1: recompress pages idle-marked by the previous idle run
     # that have stayed untouched since (their idle flag survived).
-    echo "type=idle" > "$dev/recompress"
+    #
+    # Deliberately NOT fatal. The write is a request to the kernel to do
+    # optional background work, and the kernel can refuse it for reasons that
+    # have nothing to do with whether phase 2 should run -- EAGAIN while another
+    # post-processing action (writeback, a concurrent recompress) holds
+    # pp_in_progress, or EINVAL from a state the gates above cannot see.
+    # Wrapping it in the `if` condition is what exempts it from errexit; the
+    # brace group's stderr is folded into the captured stdout so the kernel's
+    # own error text reaches the journal instead of being thrown away.
+    phase1_failed=0
+    if ! phase1_err=$({ echo "type=idle" > "$dev/recompress"; } 2>&1); then
+      phase1_failed=1
+      echo "nixram: WARNING the kernel refused the recompression pass (''${phase1_err:-no error text}) with recomp_algorithm=''${recomp_algs} -- continuing to the idle marking anyway so the next run still has input" >&2
+    fi
 
     # Phase 2: mark the current resident set idle, for the NEXT idle
     # run to act on after a full dwell period.
-    echo "all" > "$dev/idle"
+    #
+    # This one IS fatal. Unlike phase 1 it asks for no work, only a flag sweep,
+    # and the gates above have already established that the device exists and is
+    # initialised -- so a failure here is not a busy kernel, it is the two-phase
+    # design being broken, and the next run would have nothing to act on.
+    if ! phase2_err=$({ echo "all" > "$dev/idle"; } 2>&1); then
+      echo "nixram: idle marking failed on an initialised device (''${phase2_err:-no error text}) -- the next recompression run will have no idle pages to act on" >&2
+      exit 1
+    fi
+
+    # Report phase 1's refusal only now, with phase 2 already done. Losing a
+    # pass is worth a red unit; losing the marking that feeds every future pass
+    # is not something to risk in order to report it.
+    if [ "$phase1_failed" != "0" ]; then
+      exit 1
+    fi
   '';
 
   # PSI-gated swappiness relief valve. the operator's own design intent: hold

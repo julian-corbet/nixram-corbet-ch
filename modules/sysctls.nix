@@ -11,7 +11,11 @@
 # page-cluster is a property of the SWAP MEDIUM, not the box's size (see
 # docs/rationale.md [4]) -- it branches on `mode`, not the level, and
 # `mode = "none"` deliberately leaves it untouched (there is no managed
-# swap medium to have an opinion about).
+# swap medium to have an opinion about). "Untouched" is about RENDERING
+# only: a mode="none" host whose zram device is real but built elsewhere
+# still gets the numbers, through nixram.pageClusterHint /
+# nixram.vfsCachePressureHint / nixram.swappinessHint, and renders them
+# through whatever layer owns its config. See modules/default.nix.
 #
 # swappiness for zram DOES vary by level (docs/rationale.md [3]): it is
 # not purely a medium-cost question -- the medium-cost ratio (zram is
@@ -77,11 +81,13 @@ let
   # the kernel prefers to retain dentry/inode caches rather than reclaim
   # them at the same rate as page cache -- the reference laptop's own reasoning: keep
   # some file cache for warm rereads, let page cache take the reclaim hit
-  # slightly first. No zram-mode equivalent: this is the only real
-  # production data point this project has for this sysctl at all, so it
-  # stays zswap-only rather than guessed at for a server workload with no
-  # comparable measurement. See docs/rationale.md [3] for the sibling
-  # swappiness reasoning this pairs with.
+  # slightly first. This is the only production data point this project has
+  # for this sysctl on a ZSWAP medium, and it stays zswap-only: the zram
+  # medium has its own measurement, from a dire-tier box, pointing the
+  # opposite way (200 -- see `vfsCachePressureHint` in modules/default.nix),
+  # and neither number is evidence for the other's medium. See
+  # docs/rationale.md [3] for the sibling swappiness reasoning this pairs
+  # with.
   zswapVfsCachePressure = 80;
 
   # directed -- the reference laptop's real production value (kernel default is 0,
@@ -103,23 +109,20 @@ let
   # every zram tier by copying a desktop's value. See docs/faq.md.
   zswapOvercommitMemory = 1;
 
-  # own-measured, real production evidence -- verified live via SSH against
-  # three actual boxes running zram (none of them nixram itself, all
-  # three via an entirely separate hand-rolled zram-generator config), then
-  # cross-checked against their own source repos rather than trusting the
-  # live sysctl dump alone: a value that looks like a stale leftover
-  # default can in fact be a deliberate, documented choice, and only the
-  # config history tells the two apart. e2-micro (1G, a real "dire" tier) runs vfs_cache_pressure=200
-  # in production -- NOT inherited or accidental: it's "Step 5" of a
-  # documented, red-teamed hardening bisection (infra
-  # modules/nixos/profiles/base.nix), specifically chosen to evict
-  # inode/dentry caches aggressively once memory gets genuinely tight on a
-  # box with almost nothing to spare. a real 128G-class server (reluctant) and
-  # vultr (512M, dire) both sit at the untouched kernel default
-  # (100) for this sysctl -- no comparable real evidence exists for a
-  # reluctant-tier server, so this stays scoped to dire tiers only, the one
-  # place a real, validated production data point actually exists.
-  zramDireVfsCachePressure = 200;
+  # vm.vfs_cache_pressure and vm.page-cluster have NO constant in this file.
+  # Both are published to hosts that cannot go through this rendering at all
+  # (nixram.vfsCachePressureHint / nixram.pageClusterHint, modules/default.nix
+  # -- for a mode="none" box whose zram device is created by another
+  # mechanism), and both are rendered below FROM those options rather than
+  # from a private literal here, so the number a caller reads and the number
+  # this file writes cannot become two different numbers. Their values, the
+  # production evidence behind them, and the reason vfs_cache_pressure is
+  # scoped to dire tiers only, live with the definitions in
+  # modules/default.nix's config block.
+  #
+  # vm.overcommit_memory keeps its constant here: nothing reads it back out
+  # (see default.nix on why no `overcommitMemoryHint` exists), so there is no
+  # second copy to keep in step.
 
   # extrapolated, HEDGED -- weaker evidence than the vfs_cache_pressure case
   # above, stated plainly rather than overclaimed. A real 128G-class server
@@ -183,16 +186,20 @@ in
       }
       (mkIf (cfg.mode == "zram") ({
         # swappiness varies by level (see header comment); page-cluster
-        # is a flat medium property, identical at every level.
+        # is a flat medium property, identical at every level -- and comes
+        # from the option that publishes it rather than a literal, so this
+        # rendering and a mode="none" host reading the hint can never be
+        # looking at different numbers.
         "vm.swappiness" = mkDefault activeLevel.swappiness; # rationale.md [3]
-        "vm.page-cluster" = mkDefault 0; # sourced -- rationale.md [4]
+        "vm.page-cluster" = mkDefault cfg.pageClusterHint; # sourced -- rationale.md [4]
       }
-      # Dire tiers only (256M/512M/1G) -- own-measured from e2-micro's real
-      # production value, see zramDireVfsCachePressure above. Reluctant
-      # tiers stay untouched: no comparable evidence, and the tier already
-      # has enough true RAM to not need aggressive dentry/inode eviction.
-      // optionalAttrs (!activeLevel.swappinessReliefEnableByDefault) {
-        "vm.vfs_cache_pressure" = mkDefault zramDireVfsCachePressure;
+      # Dire tiers only (256M/512M/1G). The hint IS the tier scope: it holds
+      # the dire value where nixram has an opinion and `null` where it does
+      # not, so this renders wherever there is something to render and stays
+      # silent otherwise. Evidence and scope reasoning: modules/default.nix,
+      # `zramDireVfsCachePressure`.
+      // optionalAttrs (cfg.vfsCachePressureHint != null) {
+        "vm.vfs_cache_pressure" = mkDefault cfg.vfsCachePressureHint;
       }
       # Reluctant tiers only (2G-128G) -- extrapolated, hedged reasoning,
       # see zramReluctantOvercommitMemory above. Dire tiers stay untouched

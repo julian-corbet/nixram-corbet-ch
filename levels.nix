@@ -209,7 +209,67 @@
         compressionAlgorithm = "lz4";
         # extrapolated, own-measured -- [9]. Cheap-primary + recompression, for a workload
         # compute-boundedness reason (see rationale.md [9]) -- this shape belongs to 2G+ only.
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        #
+        # THE CANONICAL SITE for why every recompression algorithm below is a BARE
+        # algorithm name. The other ten tiers point back here.
+        #
+        # Plain "zstd", never "zstd(level=3)": zram-generator cannot deliver a level
+        # to a RECOMPRESSION algorithm at all, so the parameterised form is not
+        # merely redundant here, it is undeliverable. The two priorities take
+        # different code paths in zram-generator's setup.rs (run_device_setup, the
+        # `if prio == 0` fork):
+        #
+        #   prio 0 (primary)    params -> /sys/block/zramN/algorithm_params
+        #                       as "algo=zstd level=3". That IS the kernel's
+        #                       per-algorithm parameter interface (zram_drv.c
+        #                       algorithm_params_store -> comp_params_store, which
+        #                       parses priority/level/algo/dict and needs no
+        #                       initialised device), so it works -- which is why the
+        #                       256M/512M/1G primaries above keep their "(level=3)"
+        #                       and must NOT be stripped.
+        #   prio >= 1 (recomp)  params -> /sys/block/zramN/recompress
+        #                       as "level=3 priority=1". Wrong file: `recompress` is
+        #                       the pass TRIGGER, not a parameter store. Its parser
+        #                       (zram_drv.c recompress_store) recognises exactly
+        #                       type / max_pages / threshold / algo / priority and
+        #                       SILENTLY SKIPS every other key, "level" included --
+        #                       it does not reject it, it drops it on the floor. So
+        #                       even a write that succeeds sets no level; it just
+        #                       kicks off a recompression pass at whatever level the
+        #                       priority already has. There is no zram-generator code
+        #                       path that ever sends a level for prio >= 1.
+        #
+        # On top of that the write does not even succeed at boot, for a reason
+        # unrelated to the key: setup.rs writes the algorithms FIRST and `disksize`
+        # only afterwards, so at that moment the device is still uninitialised and
+        # recompress_store bails on `if (!init_done(zram)) ret = -EINVAL`.
+        # zram-generator degrades that to a warning, which it then misreports -- it
+        # prints the recomp_algorithm string that DID get written, not the rejected
+        # payload:
+        #
+        #   zram_generator::setup: Warning: algorithm "zstd" supplemental data
+        #   "algo=zstd priority=1" not written: Invalid argument (os error 22)
+        #
+        # Measured on a live 128 GiB host: /sys/block/zram0/recomp_algorithm read
+        # back "#1: lzo-rle lzo lz4 lz4hc [zstd] deflate 842" -- zstd registered at
+        # priority 1 with no level applied, running at the built-in default for the
+        # whole 12-day uptime. The declaration claimed a level the device never had.
+        #
+        # Dropping the parameter costs nothing, because the built-in default IS 3:
+        # ZSTD_CLEVEL_DEFAULT is 3, and zram's backend substitutes it whenever no
+        # level was supplied (backend_zstd.c -- `if (params->level ==
+        # ZCOMP_PARAM_NO_LEVEL) params->level = zstd_default_clevel();`). So plain
+        # "zstd" is bit-for-bit the same compression that was already running; the
+        # only thing that changes is that the declaration is now honest.
+        #
+        # This is also the wall experiments/004 runs into. Its recommendation to
+        # take idle-tier recompression from level 3 toward level 12 CANNOT be
+        # expressed in this file while zram-generator routes secondary parameters to
+        # `recompress`; writing "zstd(level=12)" here would be silently discarded
+        # exactly as level=3 was. Acting on that recommendation needs an upstream
+        # change first (secondary params to algorithm_params as "priority=N
+        # level=M"), not a levels.nix edit.
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -232,7 +292,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -255,7 +315,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -278,7 +338,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -301,7 +361,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -326,7 +386,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -349,7 +409,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -376,7 +436,7 @@
         # 32G or 64G) is this project's own placement, not something the operator
         # specified -- flagged as unconfirmed, not "his correction."
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -399,7 +459,7 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi, nearest 3-smooth fraction = 0.75
         residentLimitExpr = "ram * 20 / 100";  # extrapolated -- [2], 20% is the operator's figure; the 24G start is this project's placement
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)"; # extrapolated, policy call -- [11]
+        recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
         priority = 100;                              # sourced -- [12]
       };
@@ -435,7 +495,7 @@
         # of system RAM here is about 25GB"), same as 24G/32G, not a
         # further taper. See docs/rationale.md [2].
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
-        recompressionAlgorithm = "zstd(level=3)";
+        recompressionAlgorithm = "zstd";        # bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;
         # extrapolated, low marginal value at this tier -- left on by
         # default for consistency; documented alternative is
@@ -462,7 +522,9 @@
         diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi rounds to the 0.75 3-smooth fraction -- 96 GiB here, the operator's own directed correction (was 64 GiB under plain power-of-two rounding)
         residentLimitExpr = "ram * 20 / 100";  # directed -- [2], the operator's own figure ("a 20% slice... about 25GB")
         compressionAlgorithm = "lz4";           # directed, the operator: "we should use lz4 and then zstd" -- [9]
-        recompressionAlgorithm = "zstd(level=3)";
+        # This is the tier corbet-server actually runs, and the one the EINVAL
+        # documented at 2G was measured on. Bare on purpose -- see 2G.
+        recompressionAlgorithm = "zstd";
         recompressionTimerEnableByDefault = true;  # extrapolated, low value -- [13]
         priority = 100;                              # sourced -- [12]
       };
