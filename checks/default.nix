@@ -52,6 +52,10 @@ let
   cfg-512M = evalFor { nixram.level = "512M"; };
   cfg-1G = evalFor { nixram.level = "1G"; };
   cfg-128G = evalFor { nixram.level = "128G"; };
+  cfg-sysctl-reapply-disabled = evalFor {
+    nixram.level = "512M";
+    nixram.sysctls.reapplyBridge.enable = false;
+  };
   cfg-sizing-virtual = evalFor {
     nixram.level = "4G";
     nixram.zram.sizing = "virtual";
@@ -428,6 +432,14 @@ let
     (check "level-256M/vfs-cache-pressure-on-dire-tier"
       (cfg-256M.boot.kernel.sysctl."vm.vfs_cache_pressure" == 200)
       "got: ${builtins.toJSON (cfg-256M.boot.kernel.sysctl."vm.vfs_cache_pressure" or null)}")
+
+    (check "sysctls/reapply-bridge-enabled-by-default"
+      (cfg-512M.systemd.services ? "nixram-sysctl-reapply")
+      "the default config omitted the bridge that closes systemd-sysctl false-success")
+
+    (check "sysctls/reapply-bridge-explicit-opt-out"
+      (!(cfg-sysctl-reapply-disabled.systemd.services ? "nixram-sysctl-reapply"))
+      "the explicit reapplyBridge.enable=false escape hatch did not remove the service")
 
     (check "level-256M/no-overcommit-memory-on-dire-tier"
       (!(cfg-256M.boot.kernel.sysctl ? "vm.overcommit_memory"))

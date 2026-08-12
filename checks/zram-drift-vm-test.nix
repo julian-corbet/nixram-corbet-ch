@@ -22,6 +22,27 @@ pkgs.testers.nixosTest {
     machine.start()
     machine.wait_for_unit("multi-user.target")
     machine.succeed("systemctl is-active --quiet nixram-zram-drift.service")
+    machine.succeed("systemctl is-active --quiet nixram-sysctl-reapply.service")
+
+    expected_sysctls = {
+        "vm.swappiness": "120",
+        "vm.page-cluster": "0",
+        "vm.vfs_cache_pressure": "200",
+        "vm.watermark_scale_factor": "200",
+        "vm.watermark_boost_factor": "0",
+    }
+    for key, expected in expected_sysctls.items():
+        actual = machine.succeed(f"sysctl -n {key}").strip()
+        assert actual == expected, f"{key}: got {actual}, expected {expected}"
+
+    # Reproduce the false-success outcome directly: the declaration and unit
+    # can both be green while the kernel values have drifted. The default
+    # bridge must reconcile every owned value, not just swappiness.
+    machine.succeed("sysctl -q -w vm.swappiness=60 vm.page-cluster=3 vm.vfs_cache_pressure=100 vm.watermark_scale_factor=10 vm.watermark_boost_factor=15000")
+    machine.succeed("systemctl restart nixram-sysctl-reapply.service")
+    for key, expected in expected_sysctls.items():
+        actual = machine.succeed(f"sysctl -n {key}").strip()
+        assert actual == expected, f"reapply failed for {key}: got {actual}, expected {expected}"
 
     declared = machine.succeed("awk '{ print $4 }' /sys/block/zram0/mm_stat").strip()
     assert int(declared) > 16 * 1024 * 1024

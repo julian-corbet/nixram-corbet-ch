@@ -99,6 +99,10 @@ There's no default level and no eval-time auto-detection by design — see
   for the blind-spot reasoning.
 - `sysctls.enable` — escape hatch to disable the whole sysctl layer (default
   true).
+- `sysctls.reapplyBridge.enable` — re-run the rendered `sysctl.d` set after
+  `systemd-sysctl` (default true). This closes a real false-success where the
+  systemd unit exits zero but the kernel keeps its defaults; turn it off only
+  when another mechanism owns post-boot sysctl reconciliation.
 - `leanActivation.units` — service names shed just before a REAL nix closure
   swap and restarted `settleSeconds` later via a detached transient timer, so
   a resident tenant can't contend with the survival core for RAM during the

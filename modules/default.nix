@@ -769,16 +769,15 @@ in
 
     sysctls.reapplyBridge.enable = mkOption {
       type = types.bool;
-      default = false;
+      default = true;
       description = ''
-        Re-apply sysctl.d after systemd-sysctl, as insurance against a systemd-sysctl regression
-        that exits 0 while applying NOTHING.
+        Re-apply sysctl.d after systemd-sysctl, guarding against versions that exit 0 while
+        applying NOTHING.
 
-        WHY THIS EXISTS. systemd 260.1 shipped a systemd-sysctl that silently no-ops: exit 0, no
-        warning, sysctls simply not applied. Fixed in 261, but the failure mode is the dangerous
-        kind -- a box reports a clean activation and runs kernel defaults, and nothing surfaces
-        the difference until something else goes wrong. Migrated into this module from a real
-        host that hit it and carried a hand-written workaround since.
+        WHY THIS EXISTS. systemd 260.1 shipped the silent no-op, and a real NixOS host reproduced
+        it again with systemd 261.1: the unit was green, the rendered 60-nixos.conf contained all
+        five declared vm.* values, and the kernel still ran every default. Version checks cannot
+        safely gate a failure whose observable contract is a false success.
 
         Two details are load-bearing, both learned the hard way:
 
@@ -792,8 +791,9 @@ in
           outside all three, so a plain `--system` would silently drop fs.protected_*,
           kernel.kptr_restrict and friends.
 
-        Off by default: it is insurance against a version-specific bug, and on a fixed systemd it
-        is a harmless idempotent no-op rather than something every host should carry unasked.
+        On by default because on a working systemd it is a harmless idempotent re-application,
+        while on an affected one it is the only step that makes the declaration real. Disable it
+        only when another mechanism explicitly owns post-boot sysctl reconciliation.
       '';
     };
 

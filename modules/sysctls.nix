@@ -153,10 +153,9 @@ let
 in
 {
   config = mkIf (cfg.enable && cfg.sysctls.enable) {
-    # See sysctls.reapplyBridge.enable's own description for the systemd-sysctl regression this
-    # guards against and why both ExecStarts are `-` prefixed. Migrated here from a host
-    # that hit the bug: a workaround one machine carries privately is a workaround every machine
-    # running this module is one systemd bump away from needing.
+    # See sysctls.reapplyBridge.enable's own description for the systemd-sysctl false-success this
+    # guards against and why both ExecStarts are `-` prefixed. This is the default path: upstream
+    # version is not a safe discriminator because the bug reproduced on both 260.1 and 261.1.
     systemd.services.nixram-sysctl-reapply = mkIf cfg.sysctls.reapplyBridge.enable {
       description = "nixram: re-apply sysctl.d (systemd-sysctl no-op regression workaround)";
       wantedBy = [ "multi-user.target" ];
