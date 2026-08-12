@@ -24,7 +24,8 @@
 # WHY IT ONLY REPORTS. It deliberately does NOT recreate the device. Doing that means `swapoff`,
 # which pages everything resident back into RAM — on a box under memory pressure that is precisely
 # the wrong moment to do it automatically, and memory pressure is when a wrong zram size hurts
-# most. The unit tells you, and names the command; a human picks the moment.
+# most. The unit reports the mismatch and points at the safe lifecycle boundary; it deliberately
+# does not print a tempting one-line `swapoff` recipe for a constrained host.
 #
 # THE HOSTS THIS ALSO COVERS. `mode = "none"` does not mean "no zram". It is the correct mode for a
 # host whose zram device is real but created by nixpkgs' own legacy `zramSwap` module instead of
@@ -285,14 +286,25 @@ in
             # unreadable value must fall through to the report below, not abort.
             read -r _ _ _ lim _ < "$dev/mm_stat" || :
           fi
-          # Presence, not exactness: the kernel page-aligns this one and the arithmetic path
-          # differs from disksize's, so a byte comparison is not meaningful. What matters is
-          # whether a limit exists at all -- 0 means "no limit", which is the failure mode.
+          ${parseExpr declaredResident}
+          expected_limit="$expected"
           if [ -z "$lim" ] || [ "$lim" = "0" ]; then
             echo "nixram-zram-drift: RESIDENT LIMIT NOT APPLIED" >&2
             echo "  declared zram-resident-limit ${declaredResident}, live mm_stat mem_limit is ''${lim:-unreadable}" >&2
             echo "  the physical budget is nixram's whole model in this mode -- without it the" >&2
             echo "  virtual ceiling is the only bound, which is not what was declared." >&2
+            drift=1
+          elif [ "$expected_limit" = "?" ]; then
+            echo "nixram-zram-drift: cannot verify resident limit -- unrecognised expression ${declaredResident}." >&2
+            echo "  live mm_stat mem_limit is $lim bytes; check it by hand." >&2
+            drift=1
+          # The generator evaluates RAM expressions in whole MiB and the kernel page-aligns the
+          # result. The same 2 MiB tolerance used for disksize absorbs both effects without
+          # allowing an arbitrary nonzero cap to masquerade as the declared physical budget.
+          elif [ $(( lim > expected_limit ? lim - expected_limit : expected_limit - lim )) -gt 2097152 ]; then
+            echo "nixram-zram-drift: RESIDENT LIMIT MISMATCH" >&2
+            echo "  declared zram-resident-limit ${declaredResident} = $expected_limit bytes" >&2
+            echo "  live mm_stat mem_limit                              $lim bytes" >&2
             drift=1
           fi
         ''}
@@ -337,11 +349,13 @@ in
           runs mode="none", and that module renders into the same zram-generator config nixram
           would have written (nixos/modules/config/zram.nix), so the remediation below is identical.
         ''}
-        Recreate it (no reboot required):
-          swapoff /dev/${cfg.zram.driftCheck.device} && systemctl restart systemd-zram-setup@${cfg.zram.driftCheck.device}.service
+        The safe repair boundary is a planned boot into a generation whose declaration and boot
+        entry have already been verified. Do not swap off the active device on a constrained host:
+        that pages its contents back into RAM and can turn this diagnostic into an OOM incident.
 
-        Or leave it -- the next boot applies the declaration by itself. Note that swapoff pages
-        everything resident back into RAM, so pick a moment when the box has headroom.
+        A no-reboot migration needs a host-specific, rollback-capable plan that keeps the existing
+        swap online while replacement capacity is proven; this checker intentionally cannot infer
+        or execute such a plan.
         EOF
           exit 1
         fi

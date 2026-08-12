@@ -904,8 +904,8 @@ let
     # declaration to the byte.
     #
     # This is the failure mode a checker must never have: unable to run, yet indistinguishable
-    # from having run and found drift. The remedy it prints is `swapoff` on a live swap device,
-    # so a false positive costs an operator a memory-pressure incident. Hence a test on the
+    # from having run and found drift. A false positive can push an operator toward swapping off a
+    # live device and cause a memory-pressure incident. Hence a test on the
     # rendered text, not just on behaviour.
     #
     # A blunt substring test on purpose: it cannot tell a call from a comment, so the rendered
@@ -930,6 +930,20 @@ let
     (check "zram-drift/recomp-algorithm-read-without-command-substitution"
       (!(lib.hasInfix "recomp=$(cat" cfg-drift.systemd.services.nixram-zram-drift.script))
       "recomp_algorithm is still read via command substitution, which warns on the kernel's NUL padding")
+
+    # A nonzero resident limit is not enough: 1 MiB and 100 GiB are both nonzero and both violate
+    # the declaration. The checker must compare mm_stat's readable field against the expression,
+    # with only the same narrow generator/kernel rounding tolerance used for disksize.
+    (check "zram-drift/resident-limit-compared-to-declaration"
+      (lib.hasInfix "RESIDENT LIMIT MISMATCH"
+        cfg-drift.systemd.services.nixram-zram-drift.script)
+      "the drift checker still accepts every nonzero resident limit")
+
+    # Never hand an operator a copy-paste swapoff command in the failure path. On the small hosts
+    # this module exists to protect, paging the active device back into RAM can itself trigger OOM.
+    (check "zram-drift/no-unsafe-swapoff-recipe"
+      (!(lib.hasInfix "swapoff /dev/" cfg-drift.systemd.services.nixram-zram-drift.script))
+      "the drift checker still prints an unsafe one-line swapoff recipe")
 
     # ── lean-activation: activation-time tenant shedding, independent of level/mode ──────────
     (check "lean-activation/default-renders-no-script"
@@ -995,6 +1009,11 @@ else {
   # kernel/systemd behavior. See checks/swappiness-relief-vm-test.nix.
   swappiness-relief-vm-test = import ./swappiness-relief-vm-test.nix {
     inherit pkgs nixpkgs nixramModule;
+  };
+
+  # Live zram/mm_stat coverage for the physical resident-memory ceiling.
+  zram-drift-vm-test = import ./zram-drift-vm-test.nix {
+    inherit pkgs nixramModule;
   };
 
   # Eval-time tests for the system-manager (non-NixOS) backend -- same
