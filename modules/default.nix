@@ -365,7 +365,9 @@ in
       description = ''
         `zram`  : an in-RAM compressed swap device. The default, and the
                   right choice for servers/VMs with no real disk swap.
-                  Sized per `zram.sizing` below.
+                  Capacity is bounded by `zram-size`; physical residency
+                  stays elastic so the kernel never rejects swap writes at
+                  an artificial mem_limit boundary.
         `zswap` : a compressed CACHE in front of a REAL disk-backed swap
                   device (swapfile or partition). For laptops/desktops
                   that already have `swapDevices`. Requires at least one
@@ -389,34 +391,10 @@ in
       '';
     };
 
-    zram.sizing = mkOption {
-      type = types.enum [ "virtual" "physical" "both" ];
-      default = "both";
-      description = ''
-        `virtual`  : only `zram-size` (disksize) is set -- a cheap
-                     worst-case ceiling; physical usage stays elastic
-                     underneath it.
-        `physical` : only `zram-resident-limit` (mem_limit) is set.
-        `both`     : (recommended, and the default) -- set the level's
-                     disksize as a generous virtual ceiling AND
-                     mem_limit as the tight real-RAM budget that
-                     actually protects the box. See the central-conflict
-                     note at the top of levels.nix for why disksize is
-                     allowed to be generous only because mem_limit is
-                     the real budget.
-      '';
-    };
-
     zram.diskSizeOverride = mkOption {
       type = types.nullOr types.str;
       default = null;
       description = "Escape hatch: override the level's computed zram-size expression (zram-generator expression syntax, e.g. \"ram\" or \"min(ram / 2, 8192)\").";
-    };
-
-    zram.residentLimitOverride = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = "Escape hatch: override the level's computed zram-resident-limit expression. Use \"0\" for unlimited.";
     };
 
     zram.priorityOverride = mkOption {
@@ -464,12 +442,8 @@ in
     # separate table rather than a `levels.nix` field, and for exactly
     # which levels currently have a value.
     #
-    # Deliberately NOT derived from `zram.diskSizeExpr`/`residentLimitExpr`:
-    # the legacy module has no resident-limit concept at all (it only
-    # ever sets one size), so the "generous virtual ceiling vs. tight
-    # physical budget" split those two formulas encode under this
-    # project's own "both" sizing model has no equivalent single
-    # percentage to translate into.
+    # Deliberately NOT derived from `zram.diskSizeExpr`: the legacy module
+    # has its own separately-sourced sizing contract.
     zram.legacyPercent = mkOption {
       type = types.nullOr (types.ints.between 1 100);
       # See swappinessHint's own comment above for why this is
@@ -848,16 +822,12 @@ in
         Escape hatch: also arm systemd-oomd's global SwapUsedLimit
         (percent of zram's DISKSIZE, not physical usage) alongside the
         PSI-based per-slice kill this module already configures. OFF by
-        default: under `zram.sizing = "both"` (nixram's own default),
-        disksize is deliberately generous relative to the real
-        `zram-resident-limit` budget, so a swap-used-of-disksize
-        percentage reads "plenty of headroom" right up until the
-        resident limit -- the actual wall -- is hit, too late to act as
-        an early warning (see docs/faq.md, "Why aren't SwapUsedLimit /
-        ManagedOOMSwap configured anywhere?"). Set this only if you
-        understand that blind spot and want it anyway as a redundant,
-        defense-in-depth signal alongside PSI -- e.g. matching an
-        existing incident-tuned host config that already relies on it.
+        default: PSI reports pressure directly and remains meaningful
+        regardless of compression ratio, while swap-used percentage only
+        reports occupancy of the logical zram-size ceiling (see docs/faq.md,
+        "Why aren't SwapUsedLimit / ManagedOOMSwap configured anywhere?").
+        Set this only if you deliberately want a medium-specific second
+        kill signal alongside PSI.
       '';
     };
 
@@ -883,8 +853,8 @@ in
   config = mkIf cfg.enable (let
     # ── hardware.totalMiB cross-check ─────────────────────────────────
     #
-    # `zram.diskSizeOverride`/`zram.residentLimitOverride` are, in the
-    # common case, zram-generator EXPRESSION strings evaluated against
+    # `zram.diskSizeOverride` is, in the common case, a zram-generator
+    # EXPRESSION string evaluated against
     # its own runtime `ram` variable at boot ("ram * 75 / 100",
     # "min(ram/2,8192)") -- opaque to Nix, and there is no sound way to
     # eval-time-check an expression Nix cannot itself evaluate. But
@@ -920,7 +890,6 @@ in
       (o: o.miB != null && cfg.hardware.totalMiB != null && o.miB > cfg.hardware.totalMiB)
       [
         { option = "zram.diskSizeOverride"; miB = literalOverrideMiB cfg.zram.diskSizeOverride; }
-        { option = "zram.residentLimitOverride"; miB = literalOverrideMiB cfg.zram.residentLimitOverride; }
       ];
 
     # ── zram.legacyPercent's lookup ─────────────────────────────────────
@@ -1047,7 +1016,6 @@ in
       {
         assertion = cfg.mode == "zram" || (
           cfg.zram.diskSizeOverride == null
-          && cfg.zram.residentLimitOverride == null
           && cfg.zram.priorityOverride == null
           && cfg.zram.recompressionAlgorithmOverride == null
           && cfg.zram.compressionAlgorithmOverride == null

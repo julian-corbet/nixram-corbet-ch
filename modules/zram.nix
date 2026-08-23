@@ -2,9 +2,8 @@
 #
 # Wires services.zram-generator.settings -- deliberately NOT the legacy
 # NixOS `zramSwap` module, which only ever controls virtual disksize
-# (via memoryPercent/memoryMax) and has no notion of a physical
-# resident-limit at all; nixpkgs itself documents zram-generator as the
-# intended replacement. See docs/rationale.md and studies/README.md.
+# (via memoryPercent/memoryMax). nixpkgs itself documents zram-generator as
+# the intended replacement. See docs/rationale.md and studies/README.md.
 
 { lib, config, pkgs, ... }:
 
@@ -24,10 +23,6 @@ let
   diskSizeExpr = if cfg.zram.diskSizeOverride != null
     then cfg.zram.diskSizeOverride
     else activeZram.diskSizeExpr;
-
-  residentLimitExpr = if cfg.zram.residentLimitOverride != null
-    then cfg.zram.residentLimitOverride
-    else activeZram.residentLimitExpr;
 
   priority = if cfg.zram.priorityOverride != null
     then cfg.zram.priorityOverride
@@ -51,19 +46,16 @@ let
     then "${primaryAlgorithm} ${recompressionAlgorithm} (type=idle)"
     else primaryAlgorithm;
 
-  # sizing = "virtual"  -> only zram-size;
-  # sizing = "physical" -> only zram-resident-limit (zram-size stays at
-  #                        zram-generator's own upstream default,
-  #                        min(ram / 2, 4096) -- only the physical
-  #                        budget is nixram's opinion in this mode);
-  # sizing = "both"     -> both keys.
+  # `zram-resident-limit` deliberately does not appear here. The kernel's
+  # mem_limit is not a graceful memory-pressure boundary: after zram allocates a
+  # new object, crossing limit_pages makes the block write return -ENOMEM. For a
+  # swap device that surfaces as `Write-error on swap-device`, not as normal
+  # swap exhaustion or reclaim. zram's logical disksize is therefore the only
+  # capacity ceiling nixram configures; physical residency remains elastic.
   zramGeneratorSettings = {
     compression-algorithm = compressionAlgorithm;
     swap-priority = priority;
-  } // optionalAttrs (cfg.zram.sizing != "physical") {
     zram-size = diskSizeExpr;
-  } // optionalAttrs (cfg.zram.sizing != "virtual" && residentLimitExpr != null) {
-    zram-resident-limit = residentLimitExpr;
   };
 
   # The recompression maintenance script: a rolling two-phase design,
@@ -321,6 +313,40 @@ in
     # never satisfied.
     services.zram-generator.enable = true;
     services.zram-generator.settings.zram0 = zramGeneratorSettings;
+
+    # A host can merge another zram-generator definition into the same section.
+    # Refuse that at evaluation time rather than letting a downstream module put
+    # the write-error boundary back underneath nixram's otherwise-safe device.
+    assertions = [
+      {
+        assertion =
+          let
+            limit = config.services.zram-generator.settings.zram0.zram-resident-limit or null;
+          in
+          limit == null || limit == "0";
+        message = ''
+          nixram: services.zram-generator.settings.zram0.zram-resident-limit must be absent or "0".
+          A nonzero zram mem_limit rejects block writes with ENOMEM when reached; on a swap device
+          this becomes `Write-error on swap-device`. Use zram-size as the capacity ceiling instead.
+        '';
+      }
+    ];
+
+    # A switch can remove zram-resident-limit from the generated config, but
+    # zram-generator never recreates an active swap device. Unlike disksize or
+    # compression changes, this particular stale field has a safe in-place
+    # repair: the kernel permits writing 0 to mem_limit after initialization.
+    # Activation runs as root and does this before changed units are restarted;
+    # boot may not have created zram0 yet, in which case its default is already
+    # unlimited and the drift service verifies it after setup.
+    system.activationScripts.nixramZramUnlimit = {
+      text = ''
+        dev=/sys/block/zram0
+        if [ -e "$dev/mem_limit" ]; then
+          printf '0' > "$dev/mem_limit"
+        fi
+      '';
+    };
 
     # ENFORCE the mode XOR against the KERNEL's own default, not just against
     # this module's other branch. `mode` documents zram and zswap as "deliberately

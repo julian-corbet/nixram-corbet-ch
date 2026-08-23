@@ -16,181 +16,57 @@ their comments, so don't renumber without updating both.
 
 ## [1] zram disksize curve
 
-**Decision:** the zram-size (disksize, the *ceiling*) is a flat fraction of
-`ram` — **plain `ram`** (100%) at the 30%-resident tiers (256M-1G), **`ram
-* 75 / 100`** (75%) everywhere else (2G-128G, spanning both the 25%- and
-20%-resident groups).
+**Decision:** `zram-size` is plain `ram` at 256M-1G and
+`ram * 75 / 100` at 2G-128G. It is a logical capacity, not preallocated
+RAM: pages consume memory only when they are written and the physical cost
+depends on compression ratio and allocator overhead.
 
-**Derivation — the operator's stated formula, worked through exactly, not
-approximated.** Stated hand-wavy: "take the physical ram, multiply by
-pi and take the nearest base 2ish value." "Physical ram" here means the
-resident-limit budget ([2]), which this project has called "physical" all
-along (row 3 of `philosophy.md`). "Base 2ish" means a **3-smooth number**
-(OEIS A003586: only 2 and 3 as prime factors — 1, 2, 3, 4, 6, 8, 9, 12, 16,
-24, 32, 48, 64, 96, 128...), which is exactly the set of sizes RAM and VPS
-tiers actually ship in: 256M, 384M, 512M, 768M, 1G, 1.5G, 2G, 3G, 4G, 6G,
-8G, 12G, 16G, 24G, 32G, 48G, 64G, 96G, 128G. (No crisp one-word English
-term for this exists; "3-smooth" or "regular number" is the closest formal
-name — a real OEIS sequence, not invented for this project. The 3:2 step
-specifically has an old name in music theory, "sesquialtera," if a more
-evocative word is wanted.)
+The two values match the policy examples this project targets: the dire
+tiers get up to one RAM-equivalent of logical swap, while a 128 GiB-class
+host gets 96 GiB. Intermediate RAM sizes remain safe under level rounding
+because zram-generator evaluates the expression against the real MemTotal,
+not the nominal anchor size.
 
-Working it through: since the resident budget is always a FIXED percentage
-of `ram` (30%, 25%, or 20%, depending on tier group — [2]), and the
-3-smooth grid is geometrically (multiplicatively) spaced, "nearest
-3-smooth number to budget x pi" reduces to "nearest 3-smooth *fraction* to
-(percentage x pi)" — a single ratio, the same in every tier within a
-group, regardless of that tier's absolute RAM size:
+**Trade-off:** zram-generator recommends 0.1-0.5 of RAM, so both values are
+more generous than its general guidance. The larger ceiling increases useful
+compressed capacity but also permits poorly compressible data to consume more
+real RAM. nixram handles that pressure with reclaim, PSI, systemd-oomd, and
+the kernel OOM path. It does not pretend a second zram memory cap can make a
+large logical device free.
 
-| tier group | budget fraction | budget x pi() | nearest 3-smooth fraction | resulting ceiling formula |
-|---|---|---|---|---|
-| 256M-1G | 30% | 0.9425 | **1.0** | `ram` |
-| 2G-128G | 25% or 20% | 0.7854 / 0.6283 | **0.75** (both) | `ram * 75 / 100` |
+**Honesty:** extrapolated policy, checked against the project host examples.
+The 96 GiB endpoint on the 128G tier is directed. Compression measurements
+remain in experiment 006, but no fixed compression ratio is assumed as a
+safety invariant.
 
-This is not a coincidence or an approximation — it's the exact nearest
-grid point, computed precisely (see below), and it only comes out this
-clean *because* the ratio is fixed per group. A live per-box formula using
-fasteval's real `pi()`/`log()`/`round()` built-ins (verified against both
-fasteval's own docs and zram-generator's vendored man page) was tried
-first and technically works, but is unnecessary complexity once the
-reduction above is done — two flat fractions produce the identical result
-with none of the runtime branching.
+**Source:** zram-generator documents `zram-size` and its recommended range;
+the Linux zram documentation defines `disksize` as device capacity.
 
-**Checked precisely against the operator's own corrections and worked
-examples:**
+## [2] zram resident limit: disabled and refused
 
-| example | physical budget | budget x pi() | ceiling | the operator's own estimate/correction |
-|---|---|---|---|---|
-| 256M | 76.8 MiB (30%) | 241.3 MiB | **256 MiB** (ram) | "almost 400M" total (real+virtual) |
-| 512M (vultr) | 153.6 MiB (30%) | 482.5 MiB | **512 MiB** (ram) | "maybe 450-500MB virtual RAM" |
-| 768M (historical anchor, since removed — [16]) | 230.4 MiB (30%) | 723.8 MiB | **768 MiB** (ram) | "should get 768MB evidently" — exact |
-| 1G (e2-micro) | 307.2 MiB (30%) | 965.1 MiB | **1024 MiB** (ram) | "almost a GB" |
-| ~128G (server) | ~25.6 GiB (20%) | ~80.4 GiB | **96 GiB** (ram x 0.75) | "96GB is better" — exact |
+**Decision:** nixram never sets a nonzero `zram-resident-limit` and refuses a
+downstream nonzero value at evaluation time. The kernel default, 0, means
+unlimited physical residency beneath the logical disksize ceiling.
 
-Two of these (768M, ~128G) are the operator's own direct corrections to
-an intermediate pure-power-of-two-only version of this formula, which had
-rounded them down to 512 MiB and 64 GiB respectively — both technically
-3-smooth-adjacent but the WRONG grid point, since pure powers of two
-exclude the ×1.5 family (768 = 1.5 x 512; 96 = 1.5 x 64) that real RAM/VPS
-tiers also use.
+`mem_limit` is not a graceful pressure boundary. In the Linux zram write
+path, a new zsmalloc object is allocated first. `zram_can_store_page()` then
+compares allocated pool pages with `limit_pages`; once the limit is crossed,
+both the compressible and incompressible write paths free the new object and
+return `-ENOMEM` to the block layer. When zram is swap, that surfaces as
+`Write-error on swap-device`. It does not trigger ordinary swap exhaustion,
+reclaim, or automatic writeback.
 
-**Honesty:** extrapolated, own-measured for the underlying ratio
-(zstd(level=3)'s real measured compression ratio, experiment 006:
-2.09-3.30 across four real corpora, which `pi()` ≈ 3.14159 sits
-comfortably inside); directed for the pi()/3-smooth-rounding mechanism
-itself and both of its corrections (the operator's stated formula and
-the operator's own two worked-example fixes).
+The runtime contract has two layers. A NixOS activation safely writes 0 to
+the live device's `mem_limit` when it exists, which lifts a stale cap without
+swapoff, resizing, or moving resident pages. The drift service then reads the
+fourth `mm_stat` field, repairs any nonzero stale value in place, and verifies
+that the live device is unlimited. Disksize and compression mismatches still
+remain report-only because changing those requires device recreation.
 
-**Honest side-effect, stated plainly:** because `ram * 75 / 100` applies
-uniformly across both the 25%-resident group (2G-16G) and the 20%-resident
-group (24G-128G), tiers that used to have visibly different ceilings now
-don't — e.g. 16G and 24G both get a 75%-of-RAM ceiling despite a different
-resident-limit budget underneath. This is expected, not an error: the
-ceiling's only job is to stay generously above the resident limit, and the
-resident limit itself still tapers correctly (25% -> 20% at 24G, [2]); the
-ceiling fraction landing on the same 0.75 in both groups is a genuine
-consequence of the math above, not a place the taper was accidentally
-dropped.
-
-**What this changes about the "central conflict":** zram-generator's own
-upstream documentation recommends disksize fractions "in the range 0.1-0.5"
-of RAM. The new formula still exceeds that at every tier (100% at 256M-1G,
-75% at 2G-128G) but with genuinely round, RAM-buyable numbers rather than
-an arbitrary 16 GiB cap disconnected from real RAM size. Under nixram's
-resident-limit model, disksize is only the *virtual* ceiling; the real
-physical budget is `zram-resident-limit` ([2]), which stays inside a
-conservative fraction of RAM at every tier. Once a resident limit is doing
-the actual safety job, a generous disksize costs nothing but a bit of
-virtual address space, and lets compression stretch the same physical
-spend further before the medium hits a hard wall. The counterargument is
-real, and is exactly why `zram.sizing` defaults to `"both"`, never
-`"virtual"` alone: on a host running `sizing = "virtual"` alone, disksize
-*is* the only ceiling, and a generous one really can let compression
-overhead balloon.
-
-**Source:** the pi()/3-smooth-rounding derivation is the operator's own
-stated formula and the operator's own two corrections to it (768M,
-~128G), worked through precisely using real math, not approximated. The
-underlying ratio this formula approximates is this project's own
-measurement (experiment 006).
-Historical context only, no longer load-bearing for the formula itself:
-Fedora's F33 "SwapOnZRAM" change shipped `min(ram/2, 4096)`; current
-Fedora/zram-generator defaults scale to full RAM capacity capped at 8G;
-Pop!_OS ships a 16 GiB ceiling; zram-generator's own upstream docs
-recommend the 0.1-0.5 fraction range referenced above.
-
-## [2] zram-resident-limit budget model
-
-**Decision:** `zram-resident-limit` (mem_limit) tapers in three steps:
-`ram * 30 / 100` (30%) at 256M-1G, `ram * 25 / 100` (25%) at 2G-16G,
-`ram * 20 / 100` (20%) at 24G-128G. Every tier now sets a real physical cap
-— none is left unset. **Attribution, precisely:** 20% at ~128G is the
-operator's own stated figure ("taking a 20% slice of system RAM here is
-about 25GB"); 30% at 256M-1G is also the operator's (from the
-e2-micro/vultr/256M walkthrough). The 25% band and — importantly — *where
-exactly the step to 20% begins* (24G, not 32G or 64G) are this project's
-own extrapolated placement, not an operator-specified value. One data
-point was given in the entire 2G-128G range (20% at ~128G); the rest of
-the shape was built to connect it to the 30% anchor, and should be read
-as reasoned, not confirmed.
-
-**Honesty:** mixed. The resident-limit primitive itself is sourced — a
-first-class `zram-generator.conf` key that maps directly onto the kernel's
-`/sys/block/zramN/mem_limit`. The specific fractions applied at each tier are
-nixram's own extrapolated budget model, corrected from an earlier version of
-this design (below).
-
-**Reasoning:** disksize alone is a virtual ceiling that can misrepresent the
-real physical cost once compression enters the picture. This budget is what
-keeps the actual physical spend bounded regardless of what disksize claims —
-but the reason for that bound changed, and the correction is the
-operator's own, not a re-derivation from new evidence. An earlier version
-of this design reasoned the budget as *memory-safety headroom*: `ram / 2`
-on the smallest tiers "where headroom is scarce and every MiB has to be
-accounted for,"
-tapering to 35% where "there's more slack," and unset above 64G because
-"the disksize formula already caps the virtual ceiling... an additional
-physical cap was judged redundant." That reasoning is now understood to be
-wrong on two counts: it's the wrong lens (the physical leg is fundamentally
-a *CPU-tax* budget — how much RAM may ever be mid-compression-cycle at once
-— not a memory-safety backstop redundant with disksize), and it left the two
-largest tiers with no physical cap at all, which is a real gap: on a 128 GiB
-box with disksize shrunk to a small fixed cap (an old, since-replaced
-formula — [1]) and no resident limit behind it, there was nothing bounding
-how much of that pool could actually fill with compressed data at once
-beyond disksize itself — the exact combination that produced this project's
-own 20% (25 GiB) real-world zram99 sizing on a 125 GiB box that hit
-swap-slot exhaustion under a transient compression-ratio collapse (see
-`experiments/README.md` for the prior open-question framing this
-replaces).
-
-The corrected model: 30% at the smallest tiers (256M-1G), 25% in the middle
-(2G-16G), 20% from 24G through 128G (bumping down earlier than the
-disksize taper's own break point — deliberate, not derived from a
-formula). This closes what was previously an open question at 64G/128G
-(deliberately unset) — every tier now has a real, bounded physical cap.
-
-A flat 20% from 24G through 128G was briefly revised to a fourth step (15%
-at 64G/128G) on an absolute-cache-reservoir argument — 20% of a 128 GiB box
-being a much bigger physical budget than 20% of a 24 GiB one. That revision
-was **reverted**: the operator gave an explicit, specific figure for the
-128G tier ("taking a 20% slice of system RAM here is about 25GB"), and no
-further re-derivation was asked for or warranted there — 20% stands as
-stated, at every tier from 24G up.
-
-**Rounding caveat:** both `diskSizeExpr` and `residentLimitExpr` are now
-pure percentage formulas ([1]), so a machine that rounds up into a tier
-gets exactly that tier's percentages applied to its OWN real RAM, not the
-anchor's nominal value — a 33 GiB box that lands in the 64G tier still gets
-20% resident-limit and 60% disksize evaluated against its real 33 GiB
-(6.6 GiB and 19.8 GiB respectively), not the 64 GiB anchor. Rounding is
-safe for both values now, with no fixed-cap distortion left to correct
-for. See `faq.md`.
-
-**Source:** zram-generator's own upstream docs (the `zram-resident-limit` /
-`mem_limit` key); the kernel's zram sysfs documentation (`mem_limit`). The
-specific percentages are nixram's own policy call (the operator's explicit
-correction), not sourced from any upstream guidance.
+**Honesty:** sourced from the Linux zram implementation and sysfs ABI, then
+confirmed by a real-kernel regression test. The test proves an unlimited zram
+device accepts the same incompressible write that fails after a small
+`mem_limit` is applied.
 
 ## [3] vm.swappiness: 120 (256M-1G), 10 at rest / relief-gated (2G-128G), zswap 25
 
@@ -325,9 +201,8 @@ size — a 2G+ box running one such anon-heavy service will still get the
 "comfortable, reluctant" treatment (10 at rest, relief-gated) its actual
 cache profile may not support. This is a scope limitation, not a bug:
 nixram's per-level defaults assume a typical multi-service host. A box
-that doesn't fit that profile should override `swappiness` (and
-`zram.residentLimitOverride`) directly rather than expecting the level
-default to reason about workload shape it cannot see.
+that does not fit that profile should override `swappiness` directly rather
+than expecting the level default to reason about workload shape it cannot see.
 
 **zswap (25, down from 120):** a cache miss here is a REAL disk read —
 worse than the reluctant zram case's worst case — so it should be more
@@ -500,8 +375,7 @@ layer, not the kernel's OOM killer itself.
 
 **Measured (experiments/README.md, 001):** a real ephemeral NixOS VM at the
 256M level with `oomd.enable` force-overridden to `true` put `systemd-oomd`'s
-real idle `VmRSS` at 4.77 MiB — 1.86% of total RAM, 6.2% of this tier's own
-resident-limit budget. Real and measurable, not negligible, but the more
+real idle `VmRSS` at 4.77 MiB — 1.86% of total RAM. Real and measurable, not negligible, but the more
 striking number from that same measurement: the box was already at 51.5%
 idle memory usage before oomd was even added. On a box where more than half
 of RAM is already baseline overhead at idle, oomd's own ~2% permanent tax is
@@ -859,8 +733,7 @@ argument describes directly — machines this large increasingly run
 LLMs/genAI/many concurrent apps competing for CPU, so the cheap-primary-
 plus-deferred-recompression shape is the intended fit, not just consistency
 for its own sake. The marginal value is still genuinely modest in absolute
-terms once the physical resident-limit budget (20% of RAM, [2]) is already
-large, but the mechanism itself — protect live compute demand on the hot
+terms on a large-RAM host, but the mechanism itself — protect live compute demand on the hot
 path, recover density later when idle — is exactly what these boxes need,
 not a leftover default. The documented alternative for a box running one
 large, non-swap-shaped workload that ISN'T actually compute-bound in the
@@ -924,15 +797,17 @@ spike. A page written seconds before a box goes tight sits at whatever
 density the primary gave it, full stop, regardless of RAM tier. On a box
 with real slack this doesn't matter — lz4's speed plus the recompression
 pass catching up later (as designed) is still the better trade. On a box
-running with almost no `zram-resident-limit` headroom, it can matter a
-great deal: worse density under a fast-but-thin primary means the fixed
-physical budget fills up sooner under the same pressure event, independent
-of decompression speed entirely. Hitting that limit is a hard wall, not a
-soft degrade — a 2014 kernel fix (`SWAP_FULL`, Minchan Kim) exists
+running under high memory pressure, it can matter a great deal: worse
+density under a fast-but-thin primary consumes more physical RAM under the
+same pressure event, independent
+of decompression speed entirely. Filling the zram device's logical capacity
+is a hard wall, not a soft degrade — a 2014 kernel fix (`SWAP_FULL`, Minchan Kim) exists
 specifically because, before it, the VM kept trying to reclaim onto an
 already-full zram device and the system hung; the fix made the VM recognize
-"full" and route to the OOM killer instead. So the failure mode at the
-resident limit is real and immediate, not hypothetical.
+"full" and route to the OOM killer instead. That historical disksize-full
+case is distinct from `mem_limit`: nixram keeps the latter unlimited because
+crossing it fails an individual zram block write with `ENOMEM` before logical
+capacity is exhausted.
 
 This is genuinely a different axis from CPU cost, and was tempting to
 generalize into a formal "CPU class" dimension crossing the whole RAM
@@ -951,8 +826,8 @@ swap-in decompresses synchronously in the faulting thread, confirmed via
 kernel source — other cores are irrelevant to that one fault) versus
 contention/steal-time unpredictability (what "shared" actually risks) — a
 dedicated-but-slow core is still slow. Given every other zram tunable
-already has a per-box override (`diskSizeOverride`, `residentLimitOverride`,
-`priorityOverride`, `recompressionAlgorithmOverride`), adding the one that
+already has a per-box override (`diskSizeOverride`, `priorityOverride`,
+`recompressionAlgorithmOverride`), adding the one that
 was missing and stating the wanted outcome directly per box is more honest
 than inventing a taxonomy standing on an unstable, poorly-defined axis.
 
@@ -965,7 +840,7 @@ that one box back to `lz4` + a recompression pass turned on via
 already uses by default. See [9] for the full statement; kept brief here
 since [9] is now the canonical version.
 
-**Source:** the density-vs-budget mechanism is confirmed (kernel source,
+**Source:** the density-vs-pressure tradeoff is confirmed (kernel source,
 `SWAP_FULL` history); the recommendation to use the override instead of a
 new axis is nixram's own judgment, reasoned through and adversarially
 checked, not sourced from any upstream guidance — no real system was found
@@ -1000,7 +875,7 @@ explanation put 1G with the dire tiers rather than the reluctant ones —
 closing the one remaining gap (swappiness) the anchor had been keeping
 separate.
 Checked directly: `512M` and `1G` are now identical in every formula —
-`residentLimitExpr = ram * 30 / 100`, `diskSizeExpr = ram` ([1]),
+`diskSizeExpr = ram` ([1]),
 `compressionAlgorithm = zstd(level=3)` with no recompression ([9]),
 `swappiness = 120` ([3]), `watermarkScaleFactor = 200`,
 `oomd.enable = true`. A 768 MiB box rounding up to `1G` gets byte-for-byte

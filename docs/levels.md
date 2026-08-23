@@ -9,22 +9,22 @@ truth and this page has drifted.
 The full citation for every ● and ◆, and the reasoning behind every ◐, lives
 in [`rationale.md`](rationale.md), referenced by number below.
 
-| Level | zram-size | zram-resident-limit | compression | recompression | swappiness | watermark_scale_factor | oomd |
-|---|---|---|---|---|---|---|---|
-| 256M | `ram` ◐ | `ram * 30 / 100` ◆ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | off ◐ |
-| 512M | `ram` ◐ | `ram * 30 / 100` ◆ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | on ◐ |
-| 1G | `ram` ◐ | `ram * 30 / 100` ◆ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | on ◐ |
-| 2G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
-| 4G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
-| 6G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
-| 8G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
-| 10G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
-| 12G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
-| 16G | `ram * 75 / 100` ◐ | `ram * 25 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
-| 24G | `ram * 75 / 100` ◐ | `ram * 20 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
-| 32G | `ram * 75 / 100` ◐ | `ram * 20 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
-| 64G | `ram * 75 / 100` ◐ | `ram * 20 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 100 ◐ | on ◐ |
-| 128G | `ram * 75 / 100` ◐² | `ram * 20 / 100` ◆ | `lz4` ◆ | `zstd(level=3)` ◐ | 10 ◆¹ | 100 ◐ | on ◐ |
+| Level | zram-size | compression | recompression | swappiness | watermark_scale_factor | oomd |
+|---|---|---|---|---|---|---|
+| 256M | `ram` ◐ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | off ◐ |
+| 512M | `ram` ◐ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | on ◐ |
+| 1G | `ram` ◐ | `zstd(level=3)` ◆ | off | 120 ◆ | 200 ◐ | on ◐ |
+| 2G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
+| 4G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
+| 6G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
+| 8G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 150 ◐ | on ◐ |
+| 10G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
+| 12G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
+| 16G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
+| 24G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
+| 32G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 125 ● | on ◐ |
+| 64G | `ram * 75 / 100` ◐ | `lz4` ◐ | `zstd(level=3)` ◐ | 10 ◆¹ | 100 ◐ | on ◐ |
+| 128G | `ram * 75 / 100` ◐² | `lz4` ◆ | `zstd(level=3)` ◐ | 10 ◆¹ | 100 ◐ | on ◐ |
 
 ¹ resting value only. A PSI-gated relief valve (`zram.swappinessRelief`, on
 by default at every tier in this table) temporarily raises swappiness to
@@ -105,7 +105,7 @@ earlier version of this design wrongly gave 256M/512M a cheap `lz4`-primary
 operator described for the weakest possible CPU-bound hardware ("even then
 I am not sure") to the whole band — that was a real implementation mistake,
 caught and reverted, not a design change. `zram-size` is plain `ram` (100%
-of RAM) and the resident budget 30% at all three; `watermark_scale_factor`
+of RAM) at all three; `watermark_scale_factor`
 stays at 200: any fixed percentage of a tiny zone is a tiny absolute number
 of free pages, so kswapd must start reclaiming earlier to leave real
 headroom.
@@ -156,17 +156,15 @@ motivated (2G is the smallest tier where multiple concurrent services
 become the realistic norm rather than the exception) but not something the
 operator specified tier by tier.
 
-Alongside the architecture flip, `zram-size` drops to `ram * 75 / 100` and
-the resident budget tapers from 30% to 25% — a CPU-tax budget, not a
-memory-safety backstop, needing less of a share once multiple GB are
-present. Watermarks relax to 150. Swappiness drops to its reluctant resting
+Alongside the architecture flip, `zram-size` drops to `ram * 75 / 100`.
+Watermarks relax to 150. Swappiness drops to its reluctant resting
 value, **10**, with the PSI-gated relief valve active from here through
 128G (see above).
 
 ### 4G — the reference tier
 
 The most ordinary row in the table — every shared constant at its normal
-value, the standard 25% resident budget, the reluctant compression shape.
+value and the reluctant compression shape.
 To understand nixram's model, read this row first: every other tier is
 this row with one scarcity turned up or down.
 
@@ -179,68 +177,32 @@ Nothing changes but the numbers the same expressions resolve to.
 `watermark_scale_factor` steps down to **125** here — the one flat value
 Pop!_OS itself actually validated, rather than nixram's own extrapolated
 taper either side of it. Everything else continues the 2G/4G shape
-unchanged: 25% resident budget, `lz4` + recompression, swappiness resting
+unchanged: `lz4` + recompression, swappiness resting
 at 10 with the relief valve armed.
 
-### 24G — the resident-limit bump starts early
+### 24G / 32G — same logical capacity, same watermark
 
-The resident limit steps down to **20%** starting here. **The 20% figure
-itself is the operator's own stated number** — the operator gave it for
-the ~128G tier ("taking a 20% slice of system RAM here is about 25GB") —
-**but where the step down begins is not something the operator
-specified.** 24G, rather than 32G or 64G, is nixram's own extrapolated
-placement connecting that one 20% data point back to the 25% mid-tier
-band. Treat this boundary as reasoned, not
-confirmed — see [rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model).
-`zram-size` stays `ram * 75 / 100` (unchanged — see the honest side-effect
-noted in rationale.md \[1\]: the ceiling fraction lands on the same 0.75 in
-both the 25%- and 20%-resident groups, a consequence of the math, not a
-place the taper was dropped). Watermark stays at 125.
+Both keep `zram-size = ram * 75 / 100`, the reluctant compression shape,
+and the sourced 125 watermark. They are separate anchors without introducing
+another policy boundary.
 
-### 32G — same budget, no new data point
+### 64G — the watermark eases
 
-Nothing changes here that wasn't already true at 24G: same 20% resident
-limit, same extrapolated placement, same 125 watermark. Included as its own
-row purely because it's one of the fourteen anchors, not because anything
-new happens at this size.
-
-### 64G — the same budget, further out
-
-Nothing new happens to the resident limit here — it's been 20% since 24G.
-An earlier version of this design left it unset entirely at 64G+, reasoning
-`zram-size`'s own (then much smaller) ceiling made a second cap redundant —
-that reasoning conflated a memory-safety argument with what this budget
-actually is: a CPU-tax bound on how much RAM may be mid-compression-cycle
-at once, which doesn't stop mattering just because the virtual ceiling is
-generous. 20% also lands exactly on `zswap.maxPoolPercent`'s own directed
-value — the same physical leg, applied to two different mechanisms.
-Watermarks ease to 100: kswapd can afford to be lazy here. For a box
+The logical zram capacity stays at 75% of RAM. Watermarks ease to 100:
+kswapd can afford to be lazy here. For a box
 running one huge, non-swap-shaped workload, the honest alternative is
 `mode = "none"` — oomd and sysctls without any swap medium.
 
-### 128G — the cap is the operator's own tier, twice over
+### 128G — 96 GiB logical capacity
 
-This is the one large tier where two separate values are the operator's
-own directly stated examples, not a borrowed placement like 24G/32G/64G:
-the **20% resident-limit** figure ("taking a 20% slice of system RAM here
-is about 25GB") and the **`lz4` + recompression** architecture ("we should
-use lz4 and then zstd"), given even though the operator described this box
-as *reluctant* — the same compute-boundedness distinction covered in the
-2G section above, not a contradiction.
+The **`lz4` + recompression** architecture is directed here ("we should use
+lz4 and then zstd"), even though the host is reluctant — the same
+compute-boundedness distinction covered in the 2G section above.
 
 `zram-size` here is **96 GiB** (`ram * 75 / 100` evaluated against 131072
-MiB), not 64 GiB — the operator's own direct correction to an earlier,
-power-of-two-only version of the rounding rule that had rounded this tier
-down to the wrong grid point ("96GB is better"). The derivation: take the
-20% resident budget, multiply by pi() (the operator's stated formula —
-"take the physical ram, multiply by pi and take the nearest base 2ish
-value"), and round to the nearest 3-smooth number (OEIS A003586 — the
-sizes RAM/VPS tiers actually ship in, which includes the ×1.5 family like
-96 = 1.5 × 64, not just plain powers of two). 20% × pi() ≈ 0.628, and the
-nearest 3-smooth *fraction* to that is 0.75 — which is why this collapses
-to the same flat `ram * 75 / 100` used at every tier from 2G up, not a
-per-tier-computed value. Full derivation and the worked-example table
-checking it against every one of the operator's real corrections:
+MiB), not 64 GiB — the operator's own direct correction ("96GB is better").
+It is the same flat `ram * 75 / 100` logical-capacity policy used at every
+tier from 2G up. See:
 [rationale.md \[1\]](rationale.md#1-zram-disksize-curve).
 
 zram at this scale is not survival — it's a parking lot for cold pages

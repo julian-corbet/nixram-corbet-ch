@@ -208,7 +208,7 @@ pkgs.testers.nixosTest {
         checkIntervalSec = 1;
       };
     };
-    # Must actually match the level: residentLimitExpr/diskSizeExpr
+    # Must actually match the level's diskSizeExpr
     # evaluate against the VM's real detected RAM at boot, same as any
     # physical machine -- see rationale.md [1]/[2] and faq.md.
     virtualisation.memorySize = 2048;

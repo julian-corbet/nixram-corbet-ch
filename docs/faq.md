@@ -31,7 +31,7 @@ the same guarantee as a tool that materializes and checks in a generated file
 automatically as part of a build, and nixram doesn't claim otherwise. It's a
 one-time manual step, same as writing down a disk's UUID.
 
-## What's the 0.1–0.5 disksize conflict, and why does nixram ignore it?
+## Why is zram-size larger than upstream's 0.1–0.5 recommendation?
 
 zram-generator's own upstream documentation recommends sizing zram's
 disksize to a fraction "in the range 0.1–0.5" of total RAM. nixram exceeds
@@ -41,27 +41,23 @@ tier from 2G through 128G. Neither fraction ever comes back down inside the
 0.1–0.5 band
 ([rationale.md \[1\]](rationale.md#1-zram-disksize-curve)).
 
-The short version: that guidance is written for setups where disksize is the
-*only* ceiling. nixram's default (`zram.sizing = "both"`) always pairs
-disksize with a resident limit (`zram-resident-limit`) that does the actual
-physical-safety job, so a generous disksize just gives compression more
-virtual room to stretch into before hitting a wall, at no real physical
-cost. If you run `zram.sizing = "virtual"` alone, you've stepped outside that
-safety net, and the upstream 0.1–0.5 guidance is exactly the caution you
-should be re-applying yourself.
+The guidance is conservative and remains a real trade-off. nixram's larger
+logical sizes match its worked host policies: full RAM on the dire tiers and
+75% on larger hosts. `zram-size` allocates nothing up front, but poorly
+compressible pages can eventually consume close to that much real RAM.
+systemd-oomd and the kernel's reclaim/OOM paths protect the host under real
+pressure. nixram deliberately does not add a second physical cap: Linux's
+zram `mem_limit` returns `ENOMEM` from block writes when reached, which turns
+into `Write-error on swap-device` rather than graceful reclaim.
 
 ## Why aren't `SwapUsedLimit` / `ManagedOOMSwap` configured by default?
 
 Deliberately, at every level. `SwapUsedLimit` and the per-unit
 `ManagedOOMSwap=kill` opt-in are both swap-used-over-swap-total percentage
-detectors. Under nixram's default sizing (`zram.sizing = "both"`), swap-total
-means disksize — and disksize is deliberately set beyond the real
-physical budget (`zram-resident-limit`), which is the whole point of
-[rationale.md \[1\]](rationale.md#1-zram-disksize-curve). A percentage
-detector measured against that inflated denominator reads "plenty of
-headroom" right up until the resident limit — the actual wall — is hit, at
-which point it's already too late for a percentage-of-disksize warning to
-have fired early.
+detectors. Under zram, swap-total means logical disksize, while the real RAM
+footprint varies with compression ratio and allocator overhead. A percentage
+of that logical denominator therefore does not directly describe memory
+pressure.
 
 PSI (pressure stall information) has no such blind spot: stall time is
 medium-agnostic. It doesn't care whether the swap medium is zram, zswap, or a
@@ -127,37 +123,18 @@ leaving no trace, since the log line is there if you go looking.
 
 Yes. `nix run <flake>#detect-level` rounds a
 machine's actual RAM up to the nearest of the fourteen anchors, never down.
-That's safe because every level's expressions are RAM-*relative* (`ram * 30
-/ 100`, `ram * 25 / 100`, and so on) — zram-generator evaluates them against
-the real `/proc/meminfo` at boot, not against the anchor's nominal `ramMiB`.
-A machine with, say, 20 GiB of RAM that rounds up to the "24G" level still
-gets disksize and resident-limit expressions computed from its real 20 GiB,
-not an imagined 24 GiB. Every tier now sets a real resident-limit budget —
-there is no tier where it's left unset — so rounding never leaves a machine
-without a physical cap.
-
-Both values are honest under rounding now, with no distortion left over from
-the old fixed-cap ceiling formula. Since `diskSizeExpr` and
-`residentLimitExpr` are both pure percentage-of-real-RAM formulas at every
-tier ([rationale.md \[1\]](rationale.md#1-zram-disksize-curve),
-[rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model)), a
-machine that rounds up into a bigger anchor still gets that anchor's
-percentages applied to its OWN real RAM, not the anchor's nominal size — a
-33 GiB machine that rounds up into the 64G tier gets 20% resident-limit and
-75% disksize evaluated against its real 33 GiB (6.6 GiB and ~24.75 GiB
-respectively), not the 64 GiB anchor's numbers. There's no fixed-cap
-distortion left to correct for; `zram.diskSizeOverride` and
-`zram.residentLimitOverride` remain available for anyone who wants to
-override either value directly regardless.
+That's safe because each level's `diskSizeExpr` is RAM-relative (`ram` or
+`ram * 75 / 100`) and zram-generator evaluates it against the real
+`/proc/meminfo` at boot, not the anchor's nominal `ramMiB`. A machine with,
+say, 20 GiB of RAM that rounds up to the "24G" level gets a 15 GiB logical
+zram device, not one sized as if 24 GiB were installed. Physical residency
+remains elastic; no level sets a nonzero `mem_limit`.
 
 ## Why not the legacy NixOS `zramSwap` module?
 
-NixOS's built-in `zramSwap` module only ever controls virtual disksize (via
-`memoryPercent` / `memoryMax`) — it has no concept of a physical resident
-limit at all, which is the mechanism nixram's whole budget model
-([rationale.md \[2\]](rationale.md#2-zram-resident-limit-budget-model))
-depends on. `zram-generator` is the module nixpkgs itself documents as the
-intended successor, and it's what nixram wires directly
+NixOS's built-in `zramSwap` module provides fewer controls over algorithms,
+recompression, and generator settings. `zram-generator` is the module
+nixpkgs itself documents as the intended successor, and it's what nixram wires directly
 (`services.zram-generator.settings`). See `studies/README.md` for the fuller
 prior-art comparison.
 

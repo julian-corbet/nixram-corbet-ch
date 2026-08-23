@@ -7,9 +7,12 @@ compared against; none of them, on their own, cover the same ground.
 ## zram-generator (upstream)
 
 The mechanism nixram builds directly on top of — `services.zram-generator`
-wires `zram-size`, `zram-resident-limit`, `compression-algorithm`, and
-`swap-priority` for a single zram device. It ships sensible generic
-defaults and documents the disksize-fraction guidance nixram departs from
+can wire `zram-size`, `compression-algorithm`, and `swap-priority` for a
+single zram device. It also exposes `zram-resident-limit`, but nixram
+deliberately does not use that key: Linux turns the corresponding nonzero
+`mem_limit` into a hard block-write failure boundary, so nixram refuses it.
+Upstream ships sensible generic defaults and documents the
+disksize-fraction guidance nixram departs from
 ([docs/rationale.md \[1\]](../docs/rationale.md#1-zram-disksize-curve)), but
 it has no per-RAM-level opinions of its own, and no notion of oomd or
 sysctl coherence — it's a mechanism, not a policy.
@@ -18,9 +21,8 @@ sysctl coherence — it's a mechanism, not a policy.
 
 A one-size default (`min(ram/2, 4096)`, later revised to full-RAM scaling
 capped at 8G) shipped as Fedora's own distro-wide zram policy. No RAM-level
-tiering, no resident-limit concept distinct from disksize, and no attempt
-at oomd/sysctl coherence — a single good default for one distribution, not
-a reusable module across RAM sizes.
+tiering and no attempt at oomd/sysctl coherence — a single good default for
+one distribution, not a reusable module across RAM sizes.
 
 ## Pop!_OS default-settings
 
@@ -34,19 +36,17 @@ level-parameterized module usable across a 256M cloud instance through a
 
 ## NixOS legacy `zramSwap` module
 
-The built-in NixOS module (`memoryPercent` / `memoryMax`). Controls
-disksize only — it has no concept of `zram-resident-limit` (mem_limit) at
-all, which is the primitive nixram's whole budget model depends on
-([docs/rationale.md \[2\]](../docs/rationale.md#2-zram-resident-limit-budget-model)).
+The built-in NixOS module (`memoryPercent` / `memoryMax`). It controls the
+logical disksize only, which is also nixram's safe capacity primitive, but
+does not provide nixram's RAM-level compression, oomd, and sysctl policy.
 nixpkgs itself documents zram-generator as the intended successor.
 
 ## tuned (RHEL)
 
 RHEL's `tuned` ships named profiles tuned for throughput or latency goals
 (e.g. `throughput-performance`, `latency-performance`), but those profiles
-aren't organized around RAM size or zram/zswap budgeting at all — they're a
-different axis (workload shape) entirely, and don't model a
-disksize/resident-limit relationship in any form.
+aren't organized around RAM size or zram/zswap capacity at all — they're a
+different axis (workload shape) entirely.
 
 ## srvos / nixos-hardware
 

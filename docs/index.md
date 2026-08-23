@@ -14,7 +14,7 @@ Two distinct audiences, one module:
 - **Long-uptime servers and VMs jammed into small RAM** — anywhere from a
   256M cloud instance up through a 128G workstation-class box, running with
   no real disk swap. This is the `mode = "zram"` path (the default): an
-  in-RAM compressed swap device, sized and bounded per level, with
+  in-RAM compressed swap device, sized per level, with
   systemd-oomd armed on PSI (pressure stall information) so the box degrades
   before it OOM-kills blindly.
 - **Laptops and desktops with real disk swap** — a `mode = "zswap"` profile:
@@ -26,10 +26,9 @@ Two distinct audiences, one module:
 - **Level anchors, not per-machine guessing.** Fourteen RAM sizes, 256M
   through 128G, each with a complete, coherent set of values. See
   [levels.md](levels.md).
-- **Budget the physical, not just the virtual.** zram's `disksize` is a
-  cheap, generous virtual ceiling; `zram-resident-limit` is the real
-  physical spend, kept inside a conservative fraction of RAM at every tier.
-  This is nixram's central thesis — see
+- **Use the one safe capacity ceiling.** zram's `disksize` is a cheap logical
+  ceiling. Physical residency stays elastic: a nonzero kernel `mem_limit`
+  rejects swap writes rather than applying graceful pressure. See
   [rationale.md \[1\]](rationale.md#1-zram-disksize-curve) and
   [faq.md](faq.md) for the upstream guidance it deliberately departs from.
 - **PSI-only OOM detection.** systemd-oomd is armed on memory-pressure
@@ -49,8 +48,8 @@ Two distinct audiences, one module:
   once the pressure has actually resolved, using a slower signal on the
   way down so a brief lull doesn't bounce it back early. See
   [rationale.md \[17\]](rationale.md#17-reluctant-tier-swappiness-10-at-rest-psi-gated-relief-valve-for-genuine-overflow).
-- **An escape hatch on every layer.** Every computed value — disksize,
-  resident limit, priority, primary and recompression algorithm, the
+- **An escape hatch on every safe tuning layer.** Every computed value —
+  disksize, priority, primary and recompression algorithm, the
   swappiness-relief valve, oomd, sysctls, min_free_kbytes — has an
   override option (`zram.compressionAlgorithmOverride`,
   `zram.swappinessRelief.enable` and friends, among others). Nothing here

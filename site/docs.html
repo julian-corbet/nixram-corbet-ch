@@ -67,7 +67,7 @@
         <tr>
           <th scope="row">Hand-tuned sysctls</th>
           <td>Total control, and exactly the values you chose.</td>
-          <td>Nothing relates the swap size to the memory cap to the watchdog. You maintain the coherence by hand, per machine, forever.</td>
+          <td>Nothing relates swap capacity to compression, reclaim, and the watchdog. You maintain the coherence by hand, per machine, forever.</td>
         </tr>
         <tr>
           <th scope="row">zram-generator alone</th>
@@ -77,12 +77,12 @@
         <tr>
           <th scope="row">The built-in NixOS <code>zramSwap</code></th>
           <td>One option away, already in nixpkgs.</td>
-          <td>Only ever sets the ceiling, through <code>memoryPercent</code> and <code>memoryMax</code>. It has no concept of a real memory budget, which is the mechanism nixram's whole model depends on. nixpkgs itself documents zram-generator as the intended successor.</td>
+          <td>Sets the same safe logical-capacity primitive, through <code>memoryPercent</code> and <code>memoryMax</code>, but does not provide nixram's tiered compression, reclaim, and watchdog policy. nixpkgs itself documents zram-generator as the intended successor.</td>
         </tr>
         <tr>
           <th scope="row">Fedora SwapOnZRAM</th>
           <td>One good, well-argued default, and the source of several of nixram's cited values.</td>
-          <td>One default for one distribution. No tiering by RAM size, and no memory budget.</td>
+          <td>One default for one distribution, with no tiering by RAM size.</td>
         </tr>
         <tr>
           <th scope="row">Pop!_OS default-settings</th>
@@ -92,7 +92,7 @@
         <tr>
           <th scope="row">RHEL tuned</th>
           <td>Mature, workload-aware profiles.</td>
-          <td>Organises around workload shape rather than RAM size, and models no relationship between a ceiling and a budget.</td>
+          <td>Organises around workload shape rather than RAM size, a different policy axis.</td>
         </tr>
         <tr>
           <th scope="row">earlyoom, nohang</th>
@@ -125,103 +125,56 @@
 <!-- THE WORDS YOU NEED FIRST -->
 <div class="docs-section" id="essentials">
   <h2>The words you need first</h2>
-  <p>Four definitions carry the rest of this page. Everything else is in the <a href="#glossary">glossary at the end</a>.</p>
 
   <h3>The two mechanisms</h3>
   <dl class="glossary">
     <dt>zram</dt>
-    <dd>A block of your own RAM set up as a swap device. Cold pages get compressed and stay in memory, so you fit more into the same RAM. No disk, no file and no partition is involved anywhere in the zram path.</dd>
+    <dd>A block device in RAM used as compressed swap. No disk, file or partition is involved.</dd>
 
     <dt>zswap</dt>
-    <dd>A compressed cache that sits in front of a real disk swap partition. Pages are compressed on their way out, and cold ones are written through to the disk in the background. Once the cache is full it stops accepting, and pages go straight to disk until it drains again. It is not a swap device itself and cannot work without one behind it.</dd>
+    <dd>A compressed cache in front of a real disk swap device. It is not swap by itself and cannot work without backing swap.</dd>
   </dl>
 
-  <h3>The two limits</h3>
+  <h3>The safe zram capacity control</h3>
   <dl class="glossary">
-    <dt><code>zram-size</code> &mdash; the ceiling</dt>
-    <dd><strong>This is not disk space of any kind.</strong> It is a ceiling on how much compressed data the zram device may hold, and all of that data lives in RAM. The name is misleading, and the kernel's own name for the attribute underneath (<code>disksize</code>) is worse. There is no disk, no file and no partition anywhere in this path. Treat it as a number, not as storage.</dd>
+    <dt><code>zram-size</code> &mdash; logical capacity</dt>
+    <dd><strong>This is not disk space and it allocates nothing up front.</strong> It limits how much uncompressed page data the zram device can represent. Real RAM use varies with compression and allocator overhead.</dd>
 
-    <dt><code>zram-resident-limit</code> &mdash; the budget</dt>
-    <dd>The real cap on how much actual RAM the compressed pool may ever occupy. This is the limit that protects the machine. It maps directly onto the kernel's <code>/sys/block/zramN/mem_limit</code>.</dd>
+    <dt><code>mem_limit</code> &mdash; deliberately unlimited</dt>
+    <dd>Linux rejects zram block writes with <code>ENOMEM</code> after a nonzero cap is crossed. On swap that becomes <code>Write-error on swap-device</code>, so nixram keeps it at 0 and refuses a nonzero declaration.</dd>
   </dl>
 </div>
 
 <!-- THE MODEL -->
 <div class="docs-section" id="model">
-  <h2>The model: a ceiling and a budget</h2>
-  <p>Everything else on this page follows from one idea. zram is given two separate limits that do two different jobs.</p>
-  <p>The first is a <strong>ceiling</strong>: how much compressed data the device may hold. It is generous. It is also just a number &mdash; nothing is allocated because of it, and no storage of any kind is reserved.</p>
-  <p>The second is a <strong>budget</strong>: how much actual RAM the compressed pool may ever occupy. It is tight, and it is real. This is the one that protects the machine.</p>
-  <p>Because the budget does the safety work, the ceiling costs nothing. Setting it generously gives compression room to stretch on a machine whose pages happen to compress well, without exposing the machine to any risk if they do not.</p>
+  <h2>The model: capacity plus direct pressure signals</h2>
+  <p><code>zram-size</code> is the logical capacity ceiling. It is generous because it preallocates nothing, but its worst-case physical cost remains real when pages compress badly.</p>
+  <p>Physical residency therefore stays elastic. Reclaim, PSI, systemd-oomd and the kernel OOM path observe actual pressure. A fixed <code>mem_limit</code> is not used as a substitute because reaching it fails the underlying swap write.</p>
 
-  <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine at level 4G, the ceiling (the zram-size setting) is 75 percent of RAM, or 3 GiB, and bounds how much compressed data the device may hold. It is a number only, with no disk, file or partition behind it. The budget (the zram-resident-limit setting) is 25 percent of RAM, or 1 GiB, and bounds how much real RAM the compressed pool may occupy. Whichever limit is reached first is the one that stops you: pages that compress well hit the ceiling, pages that compress badly hit the budget, and both outcomes are bounded and safe."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
+  <pre class="arch-diagram" role="img" aria-label="On a 4 GiB machine, zram-size provides 3 GiB of logical capacity while physical memory use remains elastic and pressure is handled by reclaim, PSI, systemd-oomd and the kernel OOM path."><code>        level = "4G"   ·   a machine with 4 GiB of RAM
 
   ┌───────────────────────────────────────────────────────────┐
-  │  CEILING     zram-size = ram * 75 / 100           3 GiB   │
+  │  CAPACITY    zram-size = ram * 75 / 100         3 GiB     │
   │                                                           │
-  │  How much compressed data the device may hold.            │
-  │  A number only. No disk, no file, no partition.           │
-  │  Reaching it means: the device is full, swap is full.     │
+  │  Logical compressed capacity. Nothing is preallocated.    │
   └───────────────────────────────────────────────────────────┘
                         │
-                        │  all of it actually living in
+                        │  physical use varies with compression
                         ▼
-  ┌───────────────────────────────────────────────────────────┐
-  │  BUDGET      zram-resident-limit = 25% of RAM     1 GiB   │
-  │                                                           │
-  │  How much real RAM the compressed pool may occupy.        │
-  │  Enforced by the kernel. This is the real protection.     │
-  │  Reaching it means: no more pages accepted, same as full. │
-  └───────────────────────────────────────────────────────────┘
+       reclaim + PSI + systemd-oomd + kernel OOM
 
-  Whichever limit is reached first is the one that stops you.
-  Pages that compress well hit the ceiling. Pages that compress
-  badly hit the budget. Both outcomes are bounded and safe.</code></pre>
+  mem_limit = 0. A stale nonzero value is lifted in place.</code></pre>
 
-  <h3>What each one protects against</h3>
+  <h3>What protects the host</h3>
   <ul>
-    <li><strong>The ceiling protects against unbounded swap.</strong> Without it, the kernel would keep handing pages to a device with no stated capacity. A bounded absorber followed by a timely out-of-memory decision is better than an unbounded one followed by a slow death.</li>
-    <li><strong>The budget protects against the compressed pool eating the machine.</strong> Compressed pages are still RAM. Without a cap, badly-compressing data could grow the pool until the thing meant to relieve memory pressure becomes the cause of it.</li>
+    <li><strong>The logical ceiling bounds swap slots.</strong> Once full, normal swap exhaustion and OOM handling apply.</li>
+    <li><strong>PSI reports real stalls.</strong> systemd-oomd acts on pressure instead of guessing from a compression-dependent occupancy ratio.</li>
+    <li><strong>The drift guard repairs the old cap.</strong> It writes 0 to the live device without swapoff, resizing or moving resident pages.</li>
   </ul>
 
   <h3>Is swapping to zram bad?</h3>
-  <p>No. Parking cold pages in compressed RAM is the design working as intended. The instinct that swap-in-use is a red flag comes from disk swap, where every touched page costs a real disk read. zram swap is still RAM. It is closer to "this data got compressed" than to "this data left memory".</p>
-  <p>Watch stall time and the rate of out-of-memory kills. Do not watch swap-used percentage.</p>
+  <p>No. Parking cold pages in compressed RAM is the design working as intended. Watch stall time and out-of-memory kills, not swap-used percentage alone.</p>
 </div>
-
-<!-- QUICK START -->
-<div class="docs-section" id="quick-start">
-  <h2>Quick start</h2>
-  <p><strong>1. Find your level.</strong> Run this on the machine you are configuring. It reads the real RAM total from <code>/proc/meminfo</code> and prints a line to paste.</p>
-  <pre><code>nix run github:julian-corbet/nixram-corbet-ch#detect-level</code></pre>
-
-  <p><strong>2. Add the flake input.</strong></p>
-  <pre><code>inputs.nixram.url = "github:julian-corbet/nixram-corbet-ch";</code></pre>
-
-  <p><strong>3. Import the module and declare the level.</strong></p>
-  <pre><code>imports = [ inputs.nixram.nixosModules.nixram ];
-
-nixram = {
-  enable = true;
-  level = "4G";
-};</code></pre>
-
-  <p>That is the whole configuration. There is no build-time detection and no default level: Nix builds cannot read the target machine's live memory, so the level is a fact you detect once and commit, like a disk UUID. Enabling the module without a level is a hard build error with a message pointing at the fix.</p>
-
-  <p><strong>On a laptop with a swap partition you keep</strong>, or one that hibernates to it, add the zswap mode instead. It needs at least one entry in <code>swapDevices</code>, and it takes effect on the next boot rather than on rebuild.</p>
-  <pre><code>nixram = {
-  enable = true;
-  level = "16G";
-  mode = "zswap";
-};</code></pre>
-
-  <p><strong>To check it came up</strong>, on a zram machine:</p>
-  <pre><code>zramctl                       # the device, its algorithm, and what it holds
-swapon --show                 # zram at priority 100, above any disk swap
-systemctl status systemd-oomd # the watchdog, where the level arms it</code></pre>
-</div>
-
-<!-- LEVELS TABLE -->
 <div class="docs-section" id="levels">
   <h2>The full level table</h2>
   <p>Fourteen anchor sizes. Every value below is an expression, not a baked-in number: <code>ram</code> is zram-generator's own variable for the machine's total detected RAM in MiB, evaluated against the real <code>/proc/meminfo</code> at boot. A machine that rounds up to a larger anchor still computes from its own true RAM.</p>
@@ -241,7 +194,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="col">Level</th>
           <th scope="col">Ceiling<br><code>zram-size</code></th>
-          <th scope="col">Budget<br><code>zram-resident-limit</code></th>
           <th scope="col">Compression</th>
           <th scope="col">Recompression</th>
           <th scope="col">Reclaim start<br><code>watermark_scale_factor</code></th>
@@ -252,7 +204,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">256M</th>
           <td><code>ram</code> (100% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>30% of RAM <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td><code>zstd(level=3)</code> <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>off <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -261,7 +212,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">512M</th>
           <td><code>ram</code> (100% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>30% of RAM <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td><code>zstd(level=3)</code> <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>off <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -270,7 +220,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">1G</th>
           <td><code>ram</code> (100% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>30% of RAM <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td><code>zstd(level=3)</code> <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>off <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>200 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -279,7 +228,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">2G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -288,7 +236,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">4G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -297,7 +244,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">6G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -306,7 +252,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">8G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>150 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -315,7 +260,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">10G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
@@ -324,7 +268,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">12G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
@@ -333,7 +276,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">16G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>25% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
@@ -342,7 +284,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">24G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>20% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
@@ -351,7 +292,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">32G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>20% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>125 <abbr class="mark m-c" title="Cited from someone else's published work">C</abbr></td>
@@ -360,7 +300,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">64G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>20% of RAM <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>on <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
           <td>100 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -369,7 +308,6 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row">128G</th>
           <td><code>ram * 75 / 100</code> (75% of RAM) <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
-          <td>20% of RAM <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td><code>lz4</code> <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>on <abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr></td>
           <td>100 <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr></td>
@@ -379,14 +317,14 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     </table>
   </div>
 
-  <p>The ceiling column is now just two flat fractions, not a per-tier formula: plain <code>ram</code> (100% of RAM) at 256M/512M/1G, <code>ram * 75 / 100</code> (75% of RAM) at every tier from 2G through 128G. It is derived, not guessed: the maintainer's own formula for the ceiling is "take the physical budget, multiply by pi, and take the nearest base-2-ish value" &mdash; meaning the nearest <em>3-smooth</em> number (only 2 and 3 as prime factors: 256M, 384M, 512M, 768M, 1G, 1.5G, 2G, 3G&hellip; the sizes RAM and VPS tiers actually ship in). Because the resident-limit budget behind it ([2] below) is a fixed percentage within each tier group (30%, 25%, or 20%), and the 3-smooth grid is geometrically spaced, "nearest 3-smooth number to budget &times; pi" reduces to the same flat fraction for every tier in a group: 30% &times; pi &asymp; 0.94, which rounds to exactly 1.0 (plain <code>ram</code>); 25% &times; pi &asymp; 0.79 and 20% &times; pi &asymp; 0.63 both round to 0.75. No <code>pi()</code>/<code>round()</code>/<code>log()</code> is evaluated live at boot &mdash; it is just the two flat percentages above. The mechanism itself is the maintainer's own, and it is checked directly against his own worked examples: 256M/512M/1G resolve to 256&nbsp;MiB/512&nbsp;MiB/1&nbsp;GiB ("almost a GB" at 1G, his own words), and ~128G resolves to 96&nbsp;GiB &mdash; his own direct correction ("96GB is better") over an earlier version of this formula that rounded down to a plain 64 GiB. The curve connecting those two endpoints, and exactly which tiers fall into which resident-limit group, is this project's own extrapolation.</p>
+  <p>The ceiling column is just two flat fractions, not a per-tier formula: plain <code>ram</code> (100% of RAM) at 256M/512M/1G, and <code>ram * 75 / 100</code> (75% of RAM) at every tier from 2G through 128G. Those values match the maintainer's worked endpoints: "almost a GB" at 1G and 96&nbsp;GiB at roughly 128G. The flat policy connecting those endpoints is this project's own extrapolation. No physical resident cap sits behind the ceiling: <code>mem_limit</code> remains 0 because a nonzero value rejects zram block writes rather than providing graceful pressure control.</p>
   <p>Note that the watchdog being <em>on</em> above 256M is our own judgement, not a stated one. What is cited is the threshold it fires at (60% for 30 s), listed under <a href="#constants">Shared settings</a>.</p>
   <p>The values above are transcribed by hand from the module's own level table in <code>levels.nix</code>. Both this page and the copy in the repository documentation can drift away from it. Where they disagree, <code>levels.nix</code> is the source of truth.</p>
 
   <h3>Rounding up is safe</h3>
   <p>The detector rounds up to the next anchor, never down. That is safe because every value is an expression evaluated against the machine's real RAM at boot. A 20 GiB machine assigned to the 24G level still computes from its real 20 GiB. A machine larger than 128 GiB is assigned the 128G level, because there is nothing above it, and the expressions still compute from its real RAM.</p>
-  <p>Rounding into the 64G tier is a good example. Any machine above 32 GiB and up to 64 GiB lands there. On a 33 GiB machine that means a ceiling of about 24.75 GiB (75% of its real 33 GiB, not of the 64G anchor) and a budget of about 6.6 GiB (20% of the same real 33 GiB) &mdash; both self-correct against the machine's own true size, so there is no fixed cap to distort the picture the way an older, capped version of this formula once did.</p>
-  <p>Every anchor boundary in the current table shifts only <em>continuous percentages</em> &mdash; the ceiling, the budget, the reclaim threshold &mdash; which self-correct against the machine's real RAM regardless of which anchor picked them, and the same architecture pairing (zstd(level=3) alone at 256M-1G; lz4 plus zstd(level=3) recompression at 2G-128G, see <a href="#tiers">why each tier is shaped this way</a>) now applies uniformly across all three of the 256M/512M/1G tiers. A 768M anchor briefly existed earlier in this project's history, specifically to close a rounding gap between 512M and 1G while their zram architectures still differed from each other. Once 256M-1G were unified onto one architecture and one swappiness value, 512M and 1G became identical in every formula, and the anchor stopped changing anything a rounded-up box would experience &mdash; it was removed as part of the same correction, not kept around as an inert historical marker.</p>
+  <p>Rounding into the 64G tier is a good example. Any machine above 32 GiB and up to 64 GiB lands there. On a 33 GiB machine that means a ceiling of about 24.75 GiB (75% of its real 33 GiB, not of the 64G anchor), so there is no fixed cap to distort the picture.</p>
+  <p>Every anchor boundary in the current table uses expressions that self-correct against the machine's real RAM, and the same architecture pairing (zstd(level=3) alone at 256M-1G; lz4 plus zstd(level=3) recompression at 2G-128G, see <a href="#tiers">why each tier is shaped this way</a>) applies uniformly across all three of the 256M/512M/1G tiers. A 768M anchor briefly existed earlier in this project's history while 512M and 1G differed; once those tiers became identical in every formula, it stopped changing anything and was removed.</p>
 </div>
 
 <!-- PER TIER -->
@@ -398,20 +336,20 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <div class="explainer-card">
       <span class="kicker">256M</span>
       <h3>The survival tier</h3>
-      <p>Two things are scarce at once: RAM, and the CPU needed to compress it. The ceiling is plain <code>ram</code>, all of it, because compression is the only headroom this machine will ever get. The budget at 30% of RAM caps how much of that reach can ever become real spend &mdash; a CPU-tax bound, not a memory-safety one, which is why it's the same fraction across all three small tiers.</p>
-      <p>Compression is <code>zstd(level=3)</code> primary with <strong>no recompression pass at all</strong> &mdash; the maintainer's own direct instruction ("everything up to a GB goes to zstd primary and done"). Swappiness is eager, at 120: with this little true RAM behind the budget, the right move is to grab whatever density is available immediately rather than wait for an idle window to prove a page cold. The watchdog is off here specifically: the memory the daemon itself occupies is an unmeasured fraction of a very small total, so the kernel's own killer plus the protected-unit layer stands guard alone.</p>
+      <p>Two things are scarce at once: RAM, and the CPU needed to compress it. The logical ceiling is plain <code>ram</code>, all of it, because compression is the only headroom this machine will ever get. Physical use stays elastic beneath it; a fixed resident cap would make swap writes fail.</p>
+      <p>Compression is <code>zstd(level=3)</code> primary with <strong>no recompression pass at all</strong> &mdash; the maintainer's own direct instruction ("everything up to a GB goes to zstd primary and done"). Swappiness is eager, at 120: with this little true RAM, the right move is to grab whatever density is available immediately rather than wait for an idle window to prove a page cold. The watchdog is off here because its own measured memory footprint is a meaningful fraction of a very small total, so the kernel's own killer plus the protected-unit layer stands guard alone.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">512M</span>
       <h3>Same shape, watchdog armed</h3>
-      <p>Identical to 256M in every formula &mdash; <code>ram</code> ceiling, 30% budget, <code>zstd(level=3)</code> primary with no recompression, swappiness 120. The one thing that changes: the watchdog is armed, because its own footprint is a far smaller fraction of the machine here.</p>
+      <p>Identical to 256M in every formula &mdash; <code>ram</code> logical ceiling, unlimited physical residency, <code>zstd(level=3)</code> primary with no recompression, swappiness 120. The one thing that changes: the watchdog is armed, because its own footprint is a far smaller fraction of the machine here.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">1G</span>
       <h3>The small-box shape, last time</h3>
-      <p>Identical again to 256M/512M in every formula: <code>ram</code> ceiling, 30% budget, <code>zstd(level=3)</code> primary with no recompression, swappiness 120. This wasn't always so &mdash; an earlier version of this table put 1G with the reluctant tiers on the reasoning that it had "enough true RAM to wait." That reasoning was corrected directly: "with 1GB RAM, you need to get whatever you can" describes urgency, the same light-usage, RAM-desperate story that applies to 256M/512M, not the "enough RAM to comfortably wait" story the reluctant tiers earn instead.</p>
+      <p>Identical again to 256M/512M in every formula: <code>ram</code> logical ceiling, unlimited physical residency, <code>zstd(level=3)</code> primary with no recompression, swappiness 120. This wasn't always so &mdash; an earlier version of this table put 1G with the reluctant tiers on the reasoning that it had "enough true RAM to wait." That reasoning was corrected directly: "with 1GB RAM, you need to get whatever you can" describes urgency, the same light-usage, RAM-desperate story that applies to 256M/512M, not the "enough RAM to comfortably wait" story the reluctant tiers earn instead.</p>
       <p>Reclaim starts early across all three small tiers, at 200. Any fixed percentage of a tiny memory zone is a tiny absolute number of free pages, so background reclaim has to begin sooner to leave real headroom.</p>
     </div>
 
@@ -419,13 +357,13 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
       <span class="kicker">2G</span>
       <h3>The architecture flips, the reluctant tiers begin</h3>
       <p>Switches to a fast <code>lz4</code> primary paired with an idle-gated <code>zstd(level=3)</code> recompression pass, for a reason that is now settled directly rather than inferred: this class of machine increasingly runs actively compute-bound workloads (LLMs, genAI, many concurrent apps) that compete hard for the same CPU a dense synchronous primary would consume, so the cheap primary protects that live demand and the expensive pass is deferred to whenever the box is genuinely idle instead &mdash; which, at this scale, it reliably has. (Exactly where the 1G/2G line itself falls is still this project's own placement, not something specified tier by tier.) The ceiling also drops to <code>ram * 75 / 100</code>, 75% of RAM &mdash; the same flat fraction that now holds all the way to 128G.</p>
-      <p>The budget tapers from 30% to 25%. This is a CPU-tax bound, not a memory-safety one, and with multiple GB present the pool doesn't need quite as generous a share to keep that cost bounded. Swappiness drops to 10 at rest &mdash; the maintainer's own real historical data point &mdash; with a new PSI-gated relief valve that temporarily raises it to 60 during genuine, sustained memory pressure and lowers it back once the pressure resolves (see <a href="#constants">Shared settings</a>). Reclaim relaxes to 150.</p>
+      <p>Physical residency remains unlimited rather than acquiring a tier-specific cap. Swappiness drops to 10 at rest &mdash; the maintainer's own real historical data point &mdash; with a PSI-gated relief valve that temporarily raises it to 60 during genuine, sustained memory pressure and lowers it back once the pressure resolves (see <a href="#constants">Shared settings</a>). Reclaim relaxes to 150.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">4G</span>
       <h3>The reference tier</h3>
-      <p>The most ordinary row in the table. The ceiling is 75% of RAM, the budget is the standard 25%, and every shared constant sits at its normal value.</p>
+      <p>The most ordinary row in the table. The logical ceiling is 75% of RAM, physical residency remains elastic, and every shared constant sits at its normal value.</p>
       <p>If you want to understand any other tier, understand this one and then note what changed.</p>
     </div>
 
@@ -438,26 +376,26 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <div class="explainer-card">
       <span class="kicker">10G &middot; 12G &middot; 16G</span>
       <h3>Reclaim eases to the cited value</h3>
-      <p>Ceiling (75%) and budget (25%) hold steady through this band. The one thing that moves is <code>watermark_scale_factor</code>, which drops to 125 &mdash; the one flat value Pop!_OS itself validated, rather than the small tiers' own extrapolated taper.</p>
+      <p>The logical ceiling holds at 75% through this band. The one thing that moves is <code>watermark_scale_factor</code>, which drops to 125 &mdash; the one flat value Pop!_OS itself validated, rather than the small tiers' own extrapolated taper.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">24G &middot; 32G</span>
-      <h3>The budget bumps down early</h3>
-      <p>The ceiling stays at 75% of RAM, but the resident-limit budget drops to 20% starting at 24G &mdash; earlier than where an older version of this design used to drop the budget at all (64G). The 20% figure itself is the maintainer's own stated value (given for the ~128G tier); exactly where the step down begins (24G, not 32G or 64G) is this project's own placement connecting that figure back to the 25% anchor, not independently confirmed.</p>
+      <h3>The same safe capacity contract</h3>
+      <p>The logical ceiling stays at 75% of RAM and <code>mem_limit</code> stays 0. Reclaim and PSI respond to actual pressure instead of forcing zram writes through a tier-specific artificial wall.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">64G</span>
-      <h3>Where the budget keeps applying</h3>
-      <p>The budget stays at 20% here &mdash; unchanged since 24G, not a new taper step. An earlier version of this design left it unset above 32G, reasoning that a small enough ceiling made a second cap redundant &mdash; that reasoning conflated a memory-safety argument with what this budget actually is: a CPU-tax bound on how much RAM may be mid-compression-cycle at once, which doesn't stop mattering just because the ceiling is generous. The ceiling itself is still 75% of RAM, 48 GiB of reach here, not a fixed cap.</p>
+      <h3>The logical ceiling keeps scaling</h3>
+      <p>The ceiling remains 75% of RAM, 48 GiB of logical reach here. Physical residency remains elastic, with no separate cap that can reject swap writes.</p>
       <p>Reclaim eases to 100. For a machine running one huge workload that does not swap usefully, the honest alternative is <code>mode = "none"</code>: watchdog and kernel settings, no swap medium at all.</p>
     </div>
 
     <div class="explainer-card">
       <span class="kicker">128G</span>
       <h3>The maintainer's own correction, checked directly</h3>
-      <p>Ceiling: 96 GiB, 75% of RAM &mdash; the maintainer's own direct correction ("96GB is better") over an earlier version of the formula that rounded down to a plain 64 GiB. Budget: 20% of RAM, about 25.6 GiB, matching his own figure almost exactly ("taking a 20% slice of system RAM here is about 25GB"). Compression is <code>lz4</code> plus <code>zstd(level=3)</code> recompression, his own instruction ("we should use lz4 and then zstd") for a machine he describes as reluctant but genuinely compute-bound &mdash; LLMs, genAI, and many concurrent apps competing for the same CPU a dense primary would consume.</p>
+      <p>Ceiling: 96 GiB, 75% of RAM &mdash; the maintainer's own direct correction ("96GB is better") over an earlier formula that rounded down to 64 GiB. The earlier design also attached a 20% physical cap; that interpretation is now rejected because Linux fails zram writes at the cap. Compression is <code>lz4</code> plus <code>zstd(level=3)</code> recompression, his own instruction ("we should use lz4 and then zstd") for a machine he describes as reluctant but genuinely compute-bound &mdash; LLMs, genAI, and many concurrent apps competing for the same CPU a dense primary would consume.</p>
       <p>Everything else is as 64G.</p>
     </div>
   </div>
@@ -479,7 +417,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
         <tr>
           <th scope="row"><code>vm.swappiness</code></th>
           <td>120 at 256M/512M/1G, 10 at rest from 2G through 128G</td>
-          <td><abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> The range used to stop at 100. The kernel extended it to 200, with a documented cost model: values above 100 are explicitly sanctioned where swapping a page in is cheaper than re-reading it from disk &mdash; that part is scale-invariant. But a second, separate axis genuinely does change with RAM size: how much true RAM remains behind the physical budget, and how much file cache there is to sacrifice before ever touching anonymous memory. The eager tiers (256M/512M/1G) have little of either and lean on zram willingly, at <strong>120</strong> &mdash; the maintainer's own further revision down from an adversarially-reduced 130, itself pulled back from an initial 180 (Pop!_OS's own zram default): once file cache is genuinely near-empty, the anon:file scan-target ratio barely changes which pool reclaim picks, so the extra ceiling mostly bought earlier, more frequent reclaim triggering, i.e. pure compress/decompress cost on the class least able to spare it. The reluctant tiers (2G-128G) rest at a flat <strong>10</strong> &mdash; the maintainer's own real historical data point (the operator's previous server ran swappiness=10), replacing an earlier, never-validated flat 60 that turned out to be nothing more than the kernel's own untuned default. Which tiers count as eager versus reluctant, and the specific number each group rests at, are directed; where the group boundary itself falls (1G/2G) is this project's own placement.</td>
+          <td><abbr class="mark m-d" title="Stated directly by the maintainer">D</abbr> <abbr class="mark m-e" title="Our own reasoning, not yet measured">E</abbr> The range used to stop at 100. The kernel extended it to 200, with a documented cost model: values above 100 are explicitly sanctioned where swapping a page in is cheaper than re-reading it from disk &mdash; that part is scale-invariant. But a second, separate axis genuinely does change with RAM size: how much true RAM remains, and how much file cache there is to sacrifice before ever touching anonymous memory. The eager tiers (256M/512M/1G) have little of either and lean on zram willingly, at <strong>120</strong> &mdash; the maintainer's own further revision down from an adversarially-reduced 130, itself pulled back from an initial 180 (Pop!_OS's own zram default): once file cache is genuinely near-empty, the anon:file scan-target ratio barely changes which pool reclaim picks, so the extra ceiling mostly bought earlier, more frequent reclaim triggering, i.e. pure compress/decompress cost on the class least able to spare it. The reluctant tiers (2G-128G) rest at a flat <strong>10</strong> &mdash; the maintainer's own real historical data point (the operator's previous server ran swappiness=10), replacing an earlier, never-validated flat 60 that turned out to be nothing more than the kernel's own untuned default. Which tiers count as eager versus reluctant, and the specific number each group rests at, are directed; where the group boundary itself falls (1G/2G) is this project's own placement.</td>
         </tr>
         <tr>
           <th scope="row">Swappiness relief valve</th>
@@ -532,7 +470,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
 
   <h3>Where the watchdog is armed</h3>
   <p>The pressure thresholds are applied to <code>-.slice</code>, which covers the whole system, and <code>user.slice</code>, the parent of every logged-in user's session. nixram also points <code>systemd.oomd.enable</code> at its own <code>oomd.enable</code> with <code>mkDefault</code>, in both directions. That matters at 256M, where nixpkgs would otherwise leave the daemon running &mdash; its memory cost is the entire reason that tier disarms it.</p>
-  <p><strong>Deliberately absent:</strong> <code>SwapUsedLimit</code> and <code>ManagedOOMSwap</code>, the triggers that fire on a swap-used percentage. Such a percentage would be measured against the generous ceiling, which is larger than the real budget on purpose. It would read "plenty of headroom" right up to the moment the real wall is hit. They are not configured at all, not even as a decorative backstop.</p>
+  <p><strong>Deliberately absent:</strong> <code>SwapUsedLimit</code> and <code>ManagedOOMSwap</code>, the triggers that fire on a swap-used percentage. Such a percentage is measured against logical device capacity, not physical memory pressure. It can therefore say little about actual headroom; PSI is the signal nixram uses instead.</p>
 
   <h3>Protected units</h3>
   <p><code>oomd.protectedUnits</code> defaults to <code>[ "sshd.service" ]</code> and gets two independent layers, both applied at every level regardless of whether the watchdog is enabled:</p>
@@ -631,16 +569,8 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
           <td><code>"zram"</code>, <code>"zswap"</code> or <code>"none"</code>. Exactly three values, so zram and zswap cannot be combined by accident. <code>"zswap"</code> asserts that <code>config.swapDevices</code> is not empty.</td>
         </tr>
         <tr>
-          <th scope="row"><code>zram.sizing</code></th><td>enum</td><td><code>"both"</code></td>
-          <td><code>"virtual"</code> sets only the ceiling. <code>"physical"</code> sets only the budget, and the ceiling falls back to zram-generator's own default of <code>min(ram / 2, 4096)</code>. <code>"both"</code> sets both keys.</td>
-        </tr>
-        <tr>
           <th scope="row"><code>zram.diskSizeOverride</code></th><td>null or string</td><td><code>null</code></td>
           <td>Overrides the level's ceiling expression. Uses zram-generator's expression syntax, for example <code>"ram"</code> or <code>"min(ram / 2, 8192)"</code>. Still not disk space &mdash; the name follows the upstream key.</td>
-        </tr>
-        <tr>
-          <th scope="row"><code>zram.residentLimitOverride</code></th><td>null or string</td><td><code>null</code></td>
-          <td>Overrides the level's budget expression. <code>"0"</code> means unlimited.</td>
         </tr>
         <tr>
           <th scope="row"><code>zram.priorityOverride</code></th><td>null or int (-1 to 32767)</td><td><code>null</code></td>
@@ -741,7 +671,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <li><strong>The watchdog fires on stall time, not on a percentage.</strong> A swap-used percentage measured against the generous ceiling would read "plenty of headroom" right up to the real wall, so those triggers are not configured at all.</li>
     <li><strong>No daemon of nixram's own sits in the memory path.</strong> The only unit it ships is a oneshot that runs on a timer at the lowest CPU and I/O priority and then exits.</li>
     <li><strong>Nothing is silently guessed.</strong> Enabling the module without a level fails the build with a message. Choosing zswap without a real swap device fails the build with a message.</li>
-    <li><strong>The compressed pool is bounded by the kernel</strong>, through <code>zram-resident-limit</code>, at every level with no exceptions &mdash; 64G and 128G included.</li>
+    <li><strong>nixram never adds an artificial zram write-failure boundary.</strong> It leaves <code>mem_limit</code> at 0, refuses downstream nonzero declarations, and safely lifts a stale live value in place without swapoff.</li>
   </ul>
   <p>If you find a problem with any of this, open an issue at <a href="https://github.com/julian-corbet/nixram-corbet-ch/issues">github.com/julian-corbet/nixram-corbet-ch/issues</a>. There is no private disclosure channel, because there is no network surface to disclose against.</p>
 </div>
@@ -753,13 +683,14 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
 
   <h3>Exceeding upstream's recommended sizing</h3>
   <p>zram-generator's own documentation recommends sizing zram to somewhere between 0.1 and 0.5 of RAM. nixram's ceiling deliberately exceeds that at every tier: plain <code>ram</code>, all of it, at 256M/512M/1G, and 75% of RAM from 2G all the way through 128G &mdash; a flat fraction, not a taper down to something smaller at the large end.</p>
-  <p><strong>Why we think that is defensible.</strong> That guidance is written for setups where the ceiling is the <em>only</em> ceiling. nixram's default pairs it with a real memory budget that does the actual safety work. <strong>The catch:</strong> if you set <code>zram.sizing = "virtual"</code> you have stepped outside that net, and the 0.1&ndash;0.5 caution applies to you again in full.</p>
-  <p><strong>Where the two flat fractions come from.</strong> The ceiling formula is the maintainer's own: "take the physical budget, multiply by pi, and take the nearest base-2-ish value" &mdash; the nearest 3-smooth number (only 2 and 3 as prime factors, the sizes RAM/VPS tiers actually ship in). Because the resident-limit budget behind it is a fixed percentage within each tier group (30%, 25%, or 20%), this reduces exactly to two flat fractions: 1.0 at the 30%-budget tiers, 0.75 at the 25%- and 20%-budget tiers. See <a href="#levels">the level table</a> for the full derivation and the maintainer's own worked examples it was checked against.</p>
-  <p><strong>What would change our mind:</strong> evidence that a generous ceiling causes harm even with a budget enforced behind it.</p>
+  <p><strong>Why we think that is defensible.</strong> <code>zram-size</code> is a logical capacity and allocates nothing up front. The larger limit buys burst capacity while actual physical consumption is governed by compressibility and workload. Reclaim, PSI, systemd-oomd, and the kernel OOM path observe real pressure.</p>
+  <p><strong>The important constraint:</strong> nixram does not pair the ceiling with a fixed <code>mem_limit</code>. Linux fails the zram block write when such a cap is crossed, so it is unsafe as a pressure-control mechanism.</p>
+  <p><strong>Where the two flat fractions come from.</strong> They match the maintainer's worked endpoints &mdash; approximately all of RAM at 1G, and 96 GiB at roughly 128G &mdash; with a simple 75% curve from 2G upward. See <a href="#levels">the level table</a>.</p>
+  <p><strong>What would change our mind:</strong> evidence that the logical ceiling itself causes harm under representative pressure.</p>
 
-  <h3>Reversed: the budget used to be unset at 64G and above</h3>
-  <p>An earlier version of this design left the budget unset above 32G, reasoning that at those anchor sizes the ceiling was already small enough that a second cap looked like decoration. <strong>That reasoning was wrong</strong>: it conflated a memory-safety argument (is the ceiling already small enough) with what the budget actually bounds (how much RAM may be mid-compression-cycle at once, a CPU-tax question, not a redundant safety net). It also meant a machine that rounded up into 64G had no physical cap at all, regardless of the ceiling's own size.</p>
-  <p><strong>Current state:</strong> every tier sets a real budget, tapering 30% (256M-1G) &rarr; 25% (2G-16G) &rarr; 20% (24G-128G). Only the two endpoints of that taper (30% at the small end, 20% at roughly 128G) are the maintainer's own stated figures; the 25% band in between, and specifically where the step down to 20% begins (24G rather than 32G or 64G), are this project's own extrapolated placement connecting those two points, not independently confirmed.</p>
+  <h3>Reversed: a resident budget was unsafe</h3>
+  <p>An earlier version treated <code>zram-resident-limit</code> as a physical safety budget. Kernel-source review and a real-device regression test disproved that model: crossing the corresponding <code>mem_limit</code> returns <code>ENOMEM</code> from zram's write path, which becomes a swap-device write error.</p>
+  <p><strong>Current state:</strong> every tier leaves physical residency unlimited beneath its logical ceiling. Evaluation rejects a downstream nonzero cap, activation removes a stale live cap without recreating the device, and the drift service verifies the result.</p>
 
   <h3>The watchdog is off at 256M</h3>
   <p>The daemon carries its own memory cost, which is a meaningfully larger fraction of a 256 MiB machine than of any larger tier. <strong>What this gives up:</strong> the early-warning layer. It does not disable the kernel's own out-of-memory killer, and the protected-unit layer still applies.</p>
@@ -779,7 +710,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
   <p><strong>Requirements:</strong> Linux 6.2 or newer with <code>CONFIG_ZRAM_MULTI_COMP</code>. The script checks for the kernel control file first. If it is absent it logs one explanatory line and exits cleanly &mdash; it does not fail the timer or the boot.</p>
 
   <h3>Recompression stays on at 64G and 128G</h3>
-  <p>Machines at this scale are the ones the compute-boundedness reasoning above describes directly &mdash; LLMs, genAI, and many concurrent apps competing for CPU &mdash; so the cheap-primary-plus-deferred-recompression shape is the intended fit here, not just consistency for its own sake. The marginal value is still genuinely modest once the physical resident-limit budget (20% of RAM) is already large in absolute terms, even though the ceiling itself keeps scaling with RAM (75%, same as every other tier from 2G up) rather than sitting at a fixed cap. For a machine running one big workload that does not swap usefully &mdash; not actually compute-bound in the sense above &mdash; the documented alternative is <code>mode = "none"</code>.</p>
+  <p>Machines at this scale are the ones the compute-boundedness reasoning above describes directly &mdash; LLMs, genAI, and many concurrent apps competing for CPU &mdash; so the cheap-primary-plus-deferred-recompression shape is the intended fit here, not just consistency for its own sake. The marginal density gain may still be modest, even though the logical ceiling keeps scaling with RAM (75%, same as every other tier from 2G up). For a machine running one big workload that does not swap usefully &mdash; not actually compute-bound in the sense above &mdash; the documented alternative is <code>mode = "none"</code>.</p>
 
   <h3>Non-goals</h3>
   <ul>
@@ -813,7 +744,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
 <!-- GLOSSARY -->
 <div class="docs-section" id="glossary">
   <h2>Glossary</h2>
-  <p>Every term used on this page, in plain words. The two mechanisms and the two limits are defined <a href="#essentials">near the top</a>, where you need them first.</p>
+  <p>Every term used on this page, in plain words. The two mechanisms and the zram capacity contract are defined <a href="#essentials">near the top</a>, where you need them first.</p>
 
   <h3>Tools and modules</h3>
   <dl class="glossary">
@@ -821,7 +752,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <dd>The upstream systemd tool that actually creates and configures the zram device. nixram writes its configuration rather than implementing a device of its own.</dd>
 
     <dt><code>zramSwap</code> (the built-in NixOS module)</dt>
-    <dd>The older NixOS option set for zram. nixram deliberately does not use it. It can only set the virtual size and has no concept of a real memory budget, which is the mechanism nixram's whole model depends on. nixpkgs itself documents zram-generator as the intended successor.</dd>
+    <dd>The older NixOS option set for zram. It sets logical device size but does not provide nixram's tiered compression, reclaim, and watchdog policy. nixpkgs itself documents zram-generator as the intended successor.</dd>
   </dl>
 
   <h3>What the kernel is doing</h3>
@@ -884,7 +815,7 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <dd>Kernel command-line settings, fixed at boot. This matters in exactly one place: zswap is configured through them, so zswap changes only take effect after a reboot.</dd>
 
     <dt><code>mem_limit</code></dt>
-    <dd>The kernel control file that <code>zram-resident-limit</code> writes to. Only relevant if you are reading kernel documentation alongside this page.</dd>
+    <dd>The kernel's physical-residency cap for zram. Zero means unlimited. nixram keeps it at zero because a nonzero cap rejects block writes when crossed; it is not a graceful pressure budget.</dd>
   </dl>
 
   <h3>Compression</h3>
@@ -931,8 +862,8 @@ systemctl status systemd-oomd # the watchdog, where the level arms it</code></pr
     <dt>anchor level</dt>
     <dd>nixram's own word for one of the fourteen RAM sizes in its table. Your machine is assigned to the nearest anchor at or above its real RAM.</dd>
 
-    <dt>the taper</dt>
-    <dd>nixram's own word for how the <code>zram-resident-limit</code> budget steps down as RAM grows: 30% at 256M-1G, 25% at 2G-16G, 20% at 24G-128G. The ceiling itself no longer tapers &mdash; it is two flat percentages, not a curve.</dd>
+    <dt>the logical-capacity curve</dt>
+    <dd>The two flat percentages used for <code>zram-size</code>: 100% of real RAM at 256M-1G and 75% from 2G upward. It is not a physical-residency promise.</dd>
   </dl>
 </div>
 

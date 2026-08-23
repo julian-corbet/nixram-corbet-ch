@@ -24,48 +24,26 @@
 #   default      the kernel's own computed value, deliberately left
 #                untouched. Not a nixram opinion at all.
 #
-# `ram` inside the *Expr strings below is zram-generator's own variable
-# for total detected RAM in MiB (systemd/zram-generator, zram-size /
-# zram-resident-limit expression syntax) -- evaluated by the generator
+# `ram` inside the diskSizeExpr strings below is zram-generator's own
+# variable for total detected RAM in MiB -- evaluated by the generator
 # against the machine's real /proc/meminfo at boot, not by Nix at eval
 # time. This is why the same expr string appears on several levels: the
 # FORMULA is what's tiered, not a number baked in per level.
 #
-# THE CENTRAL CONFLICT, STATED PLAINLY (see docs/rationale.md [1] and
-# docs/faq.md for the long version): zram-generator's own upstream
-# documentation recommends zram-size fractions "in the range 0.1-0.5" of
-# RAM. Every tier here exceeds that range: `diskSizeExpr` is the tier's own
-# `residentLimitExpr` budget, multiplied by `pi()`, rounded to the nearest
-# "RAM-buyable" size -- the operator's own formula: "take the physical ram,
-# multiply by pi and take the nearest base 2ish value." Concretely, that
-# means the nearest 3-smooth number (OEIS A003586, only 2 and 3 as prime
-# factors -- the sizes RAM/VPS tiers actually ship in: 256M, 384M, 512M,
-# 768M, 1G, 1.5G, 2G, 3G...). Because the resident budget is always a FIXED
-# percentage of `ram` within a tier group (30%, 25%, or 20%), and the
-# 3-smooth grid is geometrically (multiplicatively) spaced, the nearest
-# grid point works out to the SAME simple fraction for every tier in a
-# group -- 30% x pi = 0.9425 of RAM, nearest 3-smooth fraction 1.0 (so the
-# formula collapses to plain `ram`); 25% x pi = 0.7854 and 20% x pi =
-# 0.6283 both round to 0.75. So `diskSizeExpr` is just `ram` (256M-1G) or
-# `ram * 75 / 100` (2G-128G) -- simple flat fractions, not the round()/
-# log()/pi() machinery that would be needed to compute this live for an
-# arbitrary, non-fixed ratio. This lands well above upstream's 0.5-of-RAM
-# ceiling at every tier (256 MiB at 256M, up to 96 GiB at 128G) --
-# deliberate, not an oversight, and it produces round, human-legible
-# numbers that also land inside or right at the edge of the operator's own
-# hand-calculated examples (e.g. 1G: 1 GiB ceiling vs. his own "almost a
-# GB"; ~128G: 96 GiB, exactly his own correction).
-# Under nixram's resident-limit model, disksize is only the VIRTUAL
-# ceiling; the REAL physical budget is `zram.residentLimitExpr` (zram-
-# resident-limit), which stays inside a conservative fraction of RAM at
-# every tier. Once a resident limit is doing the actual safety job, a
-# generous disksize costs nothing but a bit of virtual address space and
-# lets compression stretch the same physical spend further before the
-# medium hits a hard wall. This is nixram's central thesis; the
-# counterargument (upstream's own 0.1-0.5 guidance exists for a reason: on
-# a host running `sizing = "virtual"` alone, disksize IS the only ceiling,
-# and a generous one really can let compression overhead balloon) is real
-# and is why `zram.sizing` defaults to `"both"`, never `"virtual"` alone.
+# SIZING SAFETY, STATED PLAINLY (see docs/rationale.md [1]-[2]): disksize
+# is zram's logical capacity and does not preallocate RAM. It is also the
+# only safe capacity ceiling available to a swap device. The kernel's
+# `mem_limit` is a hard block-write failure boundary: once allocated pool
+# pages cross it, zram frees the new object and returns -ENOMEM. nixram
+# therefore never sets zram-resident-limit and rejects a downstream module
+# that tries to add a nonzero one. Physical use remains elastic beneath
+# disksize; the normal reclaim/OOM machinery handles genuine RAM pressure.
+#
+# The diskSizeExpr curve remains `ram` for the dire 256M-1G tiers and
+# `ram * 75 / 100` from 2G upward. Those are explicit logical-capacity
+# policy values checked against the project's worked examples (not a
+# promise of a separate physical budget): up to 1 GiB on the small end,
+# and 96 GiB on a 128 GiB-class host.
 
 {
   levelNames = [
@@ -79,25 +57,8 @@
 
       zram = {
         diskSizeExpr = "ram";
-        # extrapolated -- ceiling = resident-limit budget (30%) x pi(),
-        # rounded to the nearest "RAM-buyable" size (the operator's own formula:
-        # "take the physical ram, multiply by pi and take the nearest base
-        # 2ish value" -- a 3-smooth number, OEIS A003586: only 2 and 3 as
-        # prime factors, the sizes RAM/VPS tiers actually ship in: 256M,
-        # 384M, 512M, 768M, 1G, 1.5G, 2G...). 30% x pi = 0.9425 of RAM,
-        # which rounds to the nearest 3-smooth fraction of exactly 1.0 --
-        # so the formula collapses to plain `ram`, not a coincidence, a
-        # provable consequence of the ratio being fixed within this tier
-        # group (see docs/rationale.md [1] for the derivation and the
-        # check against all four of the operator's worked examples).
-        residentLimitExpr = "ram * 30 / 100";
-        # directed -- 30% is the operator's own stated figure at this tier
-        # ("Taking off 75MB for ZRAM" at 256M is ~30%; matched at 512M's
-        # "we take 30% for virtual RAM"), not a memory-safety headroom
-        # argument. Same 20-30% band as zswap.maxPoolPercent -- the two modes share this
-        # leg; only what sits behind it differs. The zram-resident-limit
-        # PRIMITIVE is sourced (systemd/zram-generator upstream); this
-        # fraction is the operator's own choice. See docs/rationale.md [2].
+        # extrapolated -- [1], a full-RAM logical capacity for the dire
+        # tiers; this allocates nothing until pages are actually swapped.
         compressionAlgorithm = "zstd(level=3)";
         # directed -- the operator's explicit instruction: "make sure that
         # everything up to a GB goes to zstd primary and done." 256M-1G
@@ -148,8 +109,7 @@
     "512M" = {
       ramMiB = 512;
       zram = {
-        diskSizeExpr = "ram";  # extrapolated -- [1], 30% budget x pi ~= 0.94, nearest 3-smooth fraction = 1.0 (ram itself)
-        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], the operator's own 30% figure ("we take 30% for virtual RAM")
+        diskSizeExpr = "ram";  # extrapolated -- [1], full-RAM logical capacity
         compressionAlgorithm = "zstd(level=3)"; # directed, the operator: "everything up to a GB goes to zstd primary and done" -- [9]
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
@@ -172,8 +132,7 @@
     "1G" = {
       ramMiB = 1024;
       zram = {
-        diskSizeExpr = "ram";  # extrapolated -- [1], 30% budget x pi ~= 0.94, nearest 3-smooth fraction = 1.0 (ram itself)
-        residentLimitExpr = "ram * 30 / 100";  # directed -- [2], the operator's own 30% figure (e2-micro walkthrough)
+        diskSizeExpr = "ram";  # extrapolated -- [1], full-RAM logical capacity
         compressionAlgorithm = "zstd(level=3)"; # directed -- [9], the operator: "we go for zstd directly"
         recompressionAlgorithm = null;
         recompressionTimerEnableByDefault = false;
@@ -201,11 +160,7 @@
     "2G" = {
       ramMiB = 2048;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        # extrapolated, own-measured -- [1]. 25% resident budget x pi(),
-        # rounded to the nearest 3-smooth "RAM-buyable" fraction (the operator's
-        # own formula -- collapses to a flat 0.75, see the file header). rationale.md [1].
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";
         # extrapolated, own-measured -- [9]. Cheap-primary + recompression, for a workload
         # compute-boundedness reason (see rationale.md [9]) -- this shape belongs to 2G+ only.
@@ -289,8 +244,7 @@
     "4G" = {
       ramMiB = 4096;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -312,8 +266,7 @@
     "6G" = {
       ramMiB = 6144;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -335,8 +288,7 @@
     "8G" = {
       ramMiB = 8192;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -358,8 +310,7 @@
     "10G" = {
       ramMiB = 10240;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -383,8 +334,7 @@
     "12G" = {
       ramMiB = 12288;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -406,8 +356,7 @@
     "16G" = {
       ramMiB = 16384;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 25% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 25 / 100";  # extrapolated -- [2]
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -429,12 +378,7 @@
     "24G" = {
       ramMiB = 24576;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 20 / 100";
-        # extrapolated -- [2]. The 20% VALUE is the operator's stated figure
-        # (given for ~128G); WHERE the 25%->20% step begins (24G, not
-        # 32G or 64G) is this project's own placement, not something the operator
-        # specified -- flagged as unconfirmed, not "his correction."
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -456,8 +400,7 @@
     "32G" = {
       ramMiB = 32768;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi, nearest 3-smooth fraction = 0.75
-        residentLimitExpr = "ram * 20 / 100";  # extrapolated -- [2], 20% is the operator's figure; the 24G start is this project's placement
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], logical capacity
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd"; # extrapolated, policy call -- [11]; bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;   # extrapolated -- [11]
@@ -480,20 +423,7 @@
       ramMiB = 65536;
       zram = {
         diskSizeExpr = "ram * 75 / 100";
-        # extrapolated, own-measured -- [1]. 20% resident budget x pi(),
-        # rounded to the nearest 3-smooth "RAM-buyable" fraction (0.75 --
-        # same fraction as 24G/32G/128G, since the ratio is fixed within
-        # this tier group). No fixed cap here (unlike Pop!_OS's borrowed
-        # 16GiB one): once the resident limit is the real safety backstop,
-        # capping the virtual disksize separately adds nothing. Evaluates
-        # to 48 GiB at this tier. See docs/rationale.md [1].
-        residentLimitExpr = "ram * 20 / 100";
-        # extrapolated -- 20% is the operator's stated figure for this
-        # tier. The "CPU-tax budget, not memory-safety backstop" framing
-        # is this project's own explanation for why it applies here too --
-        # 20% here is the operator's own explicit figure ("taking a 20% slice
-        # of system RAM here is about 25GB"), same as 24G/32G, not a
-        # further taper. See docs/rationale.md [2].
+        # extrapolated -- [1], logical capacity; 48 GiB at this tier.
         compressionAlgorithm = "lz4";           # extrapolated, own-measured -- [9]
         recompressionAlgorithm = "zstd";        # bare on purpose, see 2G
         recompressionTimerEnableByDefault = true;
@@ -519,8 +449,7 @@
     "128G" = {
       ramMiB = 131072;
       zram = {
-        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 20% budget x pi rounds to the 0.75 3-smooth fraction -- 96 GiB here, the operator's own directed correction (was 64 GiB under plain power-of-two rounding)
-        residentLimitExpr = "ram * 20 / 100";  # directed -- [2], the operator's own figure ("a 20% slice... about 25GB")
+        diskSizeExpr = "ram * 75 / 100";  # extrapolated -- [1], 96 GiB here, the operator's own directed correction (was 64 GiB)
         compressionAlgorithm = "lz4";           # directed, the operator: "we should use lz4 and then zstd" -- [9]
         # This is the tier corbet-server actually runs, and the one the EINVAL
         # documented at 2G was measured on. Bare on purpose -- see 2G.

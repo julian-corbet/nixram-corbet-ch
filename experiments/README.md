@@ -25,8 +25,8 @@ force-overridden to `true`, 30s idle settle window, `systemd-oomd`'s real
 `VmRSS` read from `/proc/<pid>/status`. See
 [`001-systemd-oomd-idle-rss/RESULTS.md`](001-systemd-oomd-idle-rss/RESULTS.md).
 
-**Result:** 4.77 MiB VmRSS on a 256 MiB box (1.86% of total RAM, 6.2% of the
-tier's own resident-limit budget) — real and measurable, not negligible, but
+**Result:** 4.77 MiB VmRSS on a 256 MiB box (1.86% of total RAM) — real and
+measurable, not negligible, but
 the more striking number is that the box is already at 51.5% idle memory
 usage before oomd is even added. Supports the existing default for a sharper
 reason than before: on a box where more than half of RAM is already baseline

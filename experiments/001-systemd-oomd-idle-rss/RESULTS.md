@@ -22,10 +22,11 @@ system idle MemTotal=214272kB MemAvailable=104012kB (used=110260kB, 51.5% of tot
 ## Reading it
 
 **The daemon's own footprint is real, not negligible, but also not huge in
-absolute terms.** 4.77 MiB is about 6.2% of this tier's own resident-limit
-safety budget (`residentLimitExpr = ram * 30 / 100` ≈ 76.8 MiB), and 1.86% of
-total system RAM. Whether that counts as "worth it" is still a judgment call
--- but it's now a judgment call against a real number, not a guess.
+absolute terms.** 4.77 MiB is 1.86% of total system RAM. Whether that counts
+as "worth it" is still a judgment call -- but it is now a judgment call
+against a real number, not a guess. A comparison in the original write-up
+against a percentage-based zram resident cap is intentionally removed: that
+cap was unsafe and is no longer part of nixram's policy.
 
 **The more striking number is the baseline itself: this box is already at
 51.5% idle memory usage before `oomd` is even added.** A 256 MiB box spends

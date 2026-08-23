@@ -7,16 +7,14 @@ instead of a dozen loosely-related knobs you have to hand-pick and hope agree
 with each other. Its Home Manager module covers the user-session policies
 that a system module cannot render safely.
 
-The thesis in three sentences: zram's `disksize` is only a cheap, virtual
-ceiling, and the real physical cost is bounded separately by
-`zram-resident-limit`, kept inside a conservative fraction of RAM at every
-tier — so disksize can afford to be generous, and compression gets room to
-stretch the same physical spend further before hitting a wall. systemd-oomd
+The thesis in three sentences: zram's `disksize` is a cheap logical ceiling,
+so it can be sized generously without preallocating RAM; physical residency
+stays elastic because the kernel's `mem_limit` rejects block writes with
+`ENOMEM` when reached and is unsafe as a swap-pressure control. systemd-oomd
 is armed on PSI (pressure stall information), not on swap-used percentage,
-because stall time is medium-agnostic and a percentage-of-disksize detector
-would be reading the wrong number under nixram's own sizing model. Every
-value nixram sets is tagged sourced, directed, extrapolated, or kernel
-default, so nothing here is presented as more settled than it actually is.
+because stall time is medium-agnostic and reports the pressure that actually
+matters. Every value nixram sets is tagged sourced, directed, extrapolated,
+or kernel default, so nothing here is presented as more settled than it is.
 
 ## Quickstart
 
@@ -43,12 +41,8 @@ There's no default level and no eval-time auto-detection by design — see
 - `level` — one of the fourteen anchor levels (`256M` … `128G`); no default,
   see [docs/faq.md](docs/faq.md).
 - `mode` — `"zram"` (default), `"zswap"`, or `"none"`.
-- `zram.sizing` — `"virtual"`, `"physical"`, or `"both"` (default; see
-  [docs/rationale.md \[1\]](docs/rationale.md#1-zram-disksize-curve)).
 - `zram.diskSizeOverride` — escape hatch for the computed `zram-size`
   expression.
-- `zram.residentLimitOverride` — escape hatch for the computed
-  `zram-resident-limit` expression (`"0"` for unlimited).
 - `zram.priorityOverride` — escape hatch for the swap device priority
   (level default: 100).
 - `zram.recompressionAlgorithmOverride` — escape hatch for the idle-tier

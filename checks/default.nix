@@ -56,14 +56,6 @@ let
     nixram.level = "512M";
     nixram.sysctls.reapplyBridge.enable = false;
   };
-  cfg-sizing-virtual = evalFor {
-    nixram.level = "4G";
-    nixram.zram.sizing = "virtual";
-  };
-  cfg-sizing-physical = evalFor {
-    nixram.level = "4G";
-    nixram.zram.sizing = "physical";
-  };
   cfg-mode-zswap = evalFor {
     nixram.level = "16G";
     nixram.mode = "zswap";
@@ -111,11 +103,7 @@ let
   };
 
   # The remaining zram escape hatches -- diskSizeOverride is covered by
-  # cfg-override above, these four were never exercised by any check.
-  cfg-override-resident-limit = evalFor {
-    nixram.level = "4G";
-    nixram.zram.residentLimitOverride = "ram / 8";
-  };
+  # cfg-override above, these three were never exercised by any check.
   cfg-override-priority = evalFor {
     nixram.level = "4G";
     nixram.zram.priorityOverride = 50;
@@ -229,8 +217,7 @@ let
   # --- level-matrix ---------------------------------------------------------
   # Every one of the 14 levels, evaluated once (mode = zram, the default) and cross-checked
   # against levels.nix's own raw table -- a copy-paste slip in any one tier (a wrong compression
-  # algorithm, an unasserted systemd.oomd.enable, the 24G residentLimitExpr/diskSizeExpr
-  # 25%->20% step levels.nix itself flags "unconfirmed") could otherwise ship silently in
+  # algorithm, an unasserted systemd.oomd.enable, or a reintroduced resident cap) could otherwise ship silently in
   # whichever tier nobody happened to write a dedicated fixture for. This is the ONE place that
   # gives every level, including any added later, coverage by construction rather than by
   # remembering to add another cfg-<level>.
@@ -254,9 +241,9 @@ let
           (zram0.zram-size == lvl.zram.diskSizeExpr)
           "got: ${builtins.toJSON (zram0.zram-size or null)}, expected: ${lvl.zram.diskSizeExpr}")
 
-        (check "level-matrix/${name}/zram-resident-limit"
-          ((zram0."zram-resident-limit" or null) == lvl.zram.residentLimitExpr)
-          "got: ${builtins.toJSON (zram0."zram-resident-limit" or null)}, expected: ${builtins.toJSON lvl.zram.residentLimitExpr}")
+        (check "level-matrix/${name}/no-zram-resident-limit"
+          (!(zram0 ? "zram-resident-limit"))
+          "unsafe resident cap rendered: ${builtins.toJSON (zram0."zram-resident-limit" or null)}")
 
         (check "level-matrix/${name}/compression-algorithm"
           (zram0.compression-algorithm == expectedCompression)
@@ -309,7 +296,6 @@ let
     (check "level-4G-defaults/zram0-settings"
       (cfg-4G.services.zram-generator.settings.zram0 == {
         zram-size = "ram * 75 / 100";
-        zram-resident-limit = "ram * 25 / 100";
         compression-algorithm = "lz4 zstd (type=idle)";
         swap-priority = 100;
       })
@@ -490,36 +476,18 @@ let
       (cfg-mode-none.nixram.swappinessHint == levelsData.levels."64G".swappiness)
       "got: ${builtins.toJSON cfg-mode-none.nixram.swappinessHint}")
 
-    # --- level-128G-resident-limit -------------------------------------------
-    (check "level-128G-resident-limit/resident-limit-attr"
-      (cfg-128G.services.zram-generator.settings.zram0."zram-resident-limit" == "ram * 20 / 100")
+    # --- level-128G -----------------------------------------------------------
+    (check "level-128G/no-resident-limit"
+      (!(cfg-128G.services.zram-generator.settings.zram0 ? "zram-resident-limit"))
       "zram0: ${builtins.toJSON cfg-128G.services.zram-generator.settings.zram0}")
 
-    (check "level-128G-resident-limit/zram-size"
+    (check "level-128G/zram-size"
       (cfg-128G.services.zram-generator.settings.zram0.zram-size == "ram * 75 / 100")
       "got: ${builtins.toJSON cfg-128G.services.zram-generator.settings.zram0.zram-size}")
 
-    (check "level-128G-resident-limit/watermark-scale-factor"
+    (check "level-128G/watermark-scale-factor"
       (cfg-128G.boot.kernel.sysctl."vm.watermark_scale_factor" == 100)
       "got: ${builtins.toJSON (cfg-128G.boot.kernel.sysctl."vm.watermark_scale_factor" or null)}")
-
-    # --- sizing-virtual ------------------------------------------------------
-    (check "sizing-virtual/has-zram-size"
-      (cfg-sizing-virtual.services.zram-generator.settings.zram0 ? "zram-size")
-      "zram0: ${builtins.toJSON cfg-sizing-virtual.services.zram-generator.settings.zram0}")
-
-    (check "sizing-virtual/no-resident-limit"
-      (!(cfg-sizing-virtual.services.zram-generator.settings.zram0 ? "zram-resident-limit"))
-      "zram0: ${builtins.toJSON cfg-sizing-virtual.services.zram-generator.settings.zram0}")
-
-    # --- sizing-physical -------------------------------------------------
-    (check "sizing-physical/has-resident-limit"
-      (cfg-sizing-physical.services.zram-generator.settings.zram0 ? "zram-resident-limit")
-      "zram0: ${builtins.toJSON cfg-sizing-physical.services.zram-generator.settings.zram0}")
-
-    (check "sizing-physical/no-zram-size"
-      (!(cfg-sizing-physical.services.zram-generator.settings.zram0 ? "zram-size"))
-      "zram0: ${builtins.toJSON cfg-sizing-physical.services.zram-generator.settings.zram0}")
 
     # --- mode XOR is ENFORCED, not just documented -------------------------
     # The option text has always called zram and zswap "mutually exclusive",
@@ -573,6 +541,18 @@ let
     (check "mode-zram/runtime-disable-still-runs-at-switch"
       (lib.elem "multi-user.target" (cfg-4G.systemd.services."nixram-zswap-disable".wantedBy or [ ]))
       "wantedBy: ${builtins.toJSON (cfg-4G.systemd.services."nixram-zswap-disable".wantedBy or [ ])}")
+
+    (check "mode-zram/activation-lifts-stale-resident-cap"
+      (lib.hasInfix "printf '0' > \"$dev/mem_limit\""
+        cfg-4G.system.activationScripts.nixramZramUnlimit.text)
+      "activation: ${cfg-4G.system.activationScripts.nixramZramUnlimit.text}")
+
+    # nixpkgs deliberately keeps this generated template alive across a
+    # switch: restarting it performs swapoff -> reset -> setup -> swapon.
+    # The in-place mem_limit repair depends on that safety contract.
+    (check "mode-zram/generated-setup-never-restarts-on-switch"
+      ((cfg-4G.systemd.services."systemd-zram-setup@".restartIfChanged or true) == false)
+      "systemd-zram-setup@.restartIfChanged must remain false")
 
     # mode="none" must NOT touch zswap either way -- it means "no swap-medium
     # opinion", and two real hosts run mode="none" precisely to adopt
@@ -674,6 +654,20 @@ let
       })
       "expected forcing system.build.toplevel to fail (zram override set while mode=zswap) but it succeeded")
 
+    (check "zram-resident-limit/eval-refuses-nonzero-cap"
+      (evalFailsBuild {
+        nixram.level = "4G";
+        services.zram-generator.settings.zram0.zram-resident-limit = "ram / 8";
+      })
+      "expected forcing system.build.toplevel to fail for a nonzero zram mem_limit, but it succeeded")
+
+    (check "zram-resident-limit/explicit-zero-is-safe"
+      (!evalFailsBuild {
+        nixram.level = "4G";
+        services.zram-generator.settings.zram0.zram-resident-limit = "0";
+      })
+      "an explicit unlimited mem_limit should remain valid")
+
     # --- reserved-name collisions ----------------------------------------
     # A `sacrificialSlices` name colliding with a reserved slice name is a hard eval-time
     # failure: a plain `//` merge in modules/oomd.nix would otherwise silently discard the
@@ -755,10 +749,6 @@ let
          && lib.hasInfix "ManagedOOMMemoryPressure" (builtins.head w)
          && lib.hasInfix "ManagedOOMMemoryPressureDurationSec" (builtins.head w))
       "got: ${builtins.toJSON cfg-nested-slice-field-collapse.warnings}")
-
-    (check "override-wins/resident-limit-override"
-      (cfg-override-resident-limit.services.zram-generator.settings.zram0."zram-resident-limit" == "ram / 8")
-      "got: ${builtins.toJSON (cfg-override-resident-limit.services.zram-generator.settings.zram0."zram-resident-limit" or null)}")
 
     (check "override-wins/priority-override"
       (cfg-override-priority.services.zram-generator.settings.zram0.swap-priority == 50)
@@ -943,13 +933,17 @@ let
       (!(lib.hasInfix "recomp=$(cat" cfg-drift.systemd.services.nixram-zram-drift.script))
       "recomp_algorithm is still read via command substitution, which warns on the kernel's NUL padding")
 
-    # A nonzero resident limit is not enough: 1 MiB and 100 GiB are both nonzero and both violate
-    # the declaration. The checker must compare mm_stat's readable field against the expression,
-    # with only the same narrow generator/kernel rounding tolerance used for disksize.
-    (check "zram-drift/resident-limit-compared-to-declaration"
-      (lib.hasInfix "RESIDENT LIMIT MISMATCH"
+    # Any nonzero resident limit is an artificial block-write failure boundary.
+    # The runtime checker must name and safely remove stale state from the old generation.
+    (check "zram-drift/nonzero-resident-limit-is-repaired"
+      (lib.hasInfix "UNSAFE RESIDENT LIMIT APPLIED"
         cfg-drift.systemd.services.nixram-zram-drift.script)
-      "the drift checker still accepts every nonzero resident limit")
+      "the drift checker does not detect a nonzero resident limit")
+
+    (check "zram-drift/repair-writes-unlimited"
+      (lib.hasInfix "printf '0' > \"$dev/mem_limit\""
+        cfg-drift.systemd.services.nixram-zram-drift.script)
+      "the drift checker does not lift stale mem_limit in place")
 
     # Never hand an operator a copy-paste swapoff command in the failure path. On the small hosts
     # this module exists to protect, paging the active device back into RAM can itself trigger OOM.
@@ -1023,7 +1017,7 @@ else {
     inherit pkgs nixpkgs nixramModule;
   };
 
-  # Live zram/mm_stat coverage for the physical resident-memory ceiling.
+  # Live zram/mm_stat and generation-switch coverage for the no-cap contract.
   zram-drift-vm-test = import ./zram-drift-vm-test.nix {
     inherit pkgs nixramModule;
   };

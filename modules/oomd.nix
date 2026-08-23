@@ -15,16 +15,9 @@
 # `oomd.swapUsedLimitPercent`. This is a documented default, not an
 # oversight -- see docs/faq.md. Reason: SwapUsedLimit and the per-unit
 # `ManagedOOMSwap=kill` opt-in are both swap-USED-over-swap-TOTAL
-# percentage detectors, and swap-TOTAL here means zram's `disksize`. On
-# every level where `zram.sizing = "both"` (the default) and disksize is
-# set generously beyond the real `residentLimit` safety budget -- which
-# is nixram's whole thesis, see levels.nix -- that percentage is
-# measured against a denominator that was never meant to be the real
-# ceiling. A swap-percentage detector reads that setup as "plenty of
-# headroom" right up until the resident limit (the actual wall) is hit,
-# at which point it's already too late for a percentage-of-disksize
-# warning to have fired early. PSI-based detection has no such blind
-# spot: stall time is medium-agnostic, it doesn't care whether the swap
+# percentage detectors, and swap-TOTAL here means zram's logical
+# `disksize`, not its variable physical footprint. PSI-based detection
+# has no such mismatch: stall time is medium-agnostic, it doesn't care whether the swap
 # medium is zram, zswap, or a disk partition, or how large its nominal
 # capacity is. So `ManagedOOMMemoryPressure` (PSI) is what every tier
 # gets BY DEFAULT; SwapUsedLimit stays off unless a host explicitly opts
